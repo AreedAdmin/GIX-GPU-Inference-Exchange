@@ -44,7 +44,7 @@ mode of compute-token projects. The split is the core of the design.
 | --- | --- | --- | --- | --- |
 | **USDC** | Circle-native stablecoin on Sui | Settlement & quote asset; unit of account; escrow; payout; fee denomination | Must be stable | `escrow`, `settlement` |
 | **GIX** | Native protocol token *(post-MVP)* | Provider stake/collateral; governance; fee rebates/discounts; security-budget emissions | Volatile by design | `staking`, `slashing`, `governance` |
-| **Compute Credit** | Fungible coin scoped to one **Market** (`gix::credit`) | Tradeable claim on one **SCU** of capacity; floats vs USDC on DeepBook | Floats with spot price | `credit`, `market` |
+| **Compute Credit** | Fungible coin scoped to one **Market** (`gix::credit`) | Tradeable claim on one **SCU** = one unit of **verified model output** (not GPU time); floats vs USDC on DeepBook | Floats with spot price | `credit`, `market` |
 
 The mental model:
 
@@ -55,7 +55,25 @@ The mental model:
   GIX token additionally confers governance and fee benefits — post-MVP.
 - **Compute Credits are what is traded for price discovery.** A `Credit<Market>` is
   not money; it is a redeemable claim on one **Standardized Compute Unit (SCU)** in
-  one market. Its USDC price *is* the spot price of compute for that market.
+  one market — one unit of the market model's **verified output** (e.g. *N* tokens at
+  the tier), **not** a unit of GPU time. Its USDC price *is* the spot price of compute
+  for that market.
+
+> **What GIX sells (canon, [overview §1/§3](architecture/overview.md)).** GIX trades the
+> **verified output of a registered model**, priced in SCUs of useful output. The **GPU
+> class is a market qualifier**, not the product and not the pricing unit; **raw GPU-time
+> is explicitly not the unit** (not cryptographically verifiable). A pure GPU-rental
+> product, if pursued, would be a separate later line with weaker, non-cryptographic
+> guarantees. The economics below price *verified output*.
+
+> **Market model (canon, [overview §3.1](architecture/overview.md)).** GIX is a **spot
+> exchange for a perishable commodity** (the electricity analogy: capacity can't be
+> hoarded). Three roles transact: **consumers** (demand — run inference now),
+> **providers** (supply — sell capacity), and **market makers** (trade credits for the
+> spread, owning no GPU and consuming nothing) — the last is why GIX uses a real CLOB.
+> Price discovery, MM liquidity, and hedging are in scope; long-horizon hoarding is
+> bounded by perishability + credit expiry ([§4.6](#46-credit-expiry--staleness),
+> [A4](open-ended-questions.md#a4--credit-expiry-window-per-market)).
 
 ### 1.1 Value-flow diagram
 
@@ -232,9 +250,17 @@ emission-funded to fee-funded security over time.
 ## 4. Compute Credits — capacity claims
 
 A **Compute Credit** (`gix::credit`) is a fungible coin scoped to a single
-**Market**. One credit = one **SCU** in that market (a bounded request or *N* output
-tokens at the market's tier, per the [glossary](glossary.md)). Credits are **claims
-on capacity, not money.**
+**Market**. One credit = one **SCU** in that market — one unit of the model's
+**verified output** (a bounded request/item, or *N* output tokens at the market's
+tier; per the [glossary](glossary.md)), **not** a unit of GPU time. Credits are
+**claims on verified output, not money.**
+
+> **v1/M2 credits are single-use.** A filled credit is consumed by its buyer's job and
+> the **filling provider is the obligated server** (assigned-from-fill). Freely-
+> resellable **bearer** credits — redeemable against *any* staked provider, with a
+> dispatch/clearing layer — are the post-MVP **tradeable-credits upgrade**
+> ([roadmap](roadmap.md) Phase 8). The minting/expiry/slashing economics below hold for
+> both; only credit *fungibility-on-resale* changes.
 
 ### 4.1 Minting against staked capacity
 
@@ -317,8 +343,11 @@ central risk. Three layers prevent it:
 
 ### 4.6 Credit expiry / staleness
 
-Credits represent capacity in a *time window*; capacity is perishable (an idle GPU
-hour is lost). To prevent stale claims accumulating against a provider's accounting:
+Credits represent capacity in a *time window*; capacity is **perishable** (an idle GPU
+hour is lost) — this is the defining property of GIX as a **spot exchange for a
+perishable commodity** ([overview §3.1](architecture/overview.md)). Expiry is also what
+**bounds long-horizon speculation/hoarding**: there is no durable inventory to corner.
+To prevent stale claims accumulating against a provider's accounting:
 
 - Credits carry (or the market enforces) an **expiry / epoch tag**; expired credits
   are not redeemable and free the corresponding capacity accounting back to the

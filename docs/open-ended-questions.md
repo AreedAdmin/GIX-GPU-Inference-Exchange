@@ -25,6 +25,27 @@ this file is only for things that genuinely need you.
 - 🟦 **tuning/research** — needs data, a spike, or later calibration.
 
 ## Already-decided (for reference, not open)
+- **What GIX sells — verified model inference, not raw GPU time (2026-06):** the traded
+  good is the **verified output of a registered model**, priced in **SCUs = units of
+  verified useful output** (per-market: *N* tokens for LLMs, a bounded request/item
+  otherwise). The **GPU class is a market *qualifier***, not the product or the pricing
+  unit; **raw GPU-time is ruled out** (not cryptographically verifiable; implies arbitrary
+  consumer code). A pure GPU-rental product would be a separate later line with weaker,
+  non-cryptographic guarantees. This is a wording/clarity lock-in of the existing design
+  (Market = (GPU class, model/runtime tier, SLA); per-market SCU) and **tightens/resolves
+  E1**. Propagated to overview §1/§3/§3.1, glossary, tokenomics §1/§4, deepbook §1/§3.1.
+- **Market structure — spot exchange for a perishable commodity (2026-06):** GIX is a
+  **spot exchange** (electricity-market analogy: capacity can't be hoarded) with **three
+  roles** — consumers (demand), providers (supply), and **market makers** (trade credits
+  for the spread, owning no GPU and consuming nothing — the reason GIX uses DeepBook).
+  Price discovery + MM liquidity + hedging are in scope; long-horizon speculation/hoarding
+  is bounded by perishability + credit expiry (consistent with A4 long-expiry).
+  **Sequencing:** M2 ships a live DeepBook order book + per-inference purchasing with
+  **single-use credits** (filling provider = obligated server; assigned-from-fill,
+  single-provider demo). A **full free-resale secondary market** — *fungible bearer
+  credits* redeemable against any staked provider, with a dispatch + clearing layer — is a
+  deliberate later milestone (the **"tradeable-credits upgrade"**, roadmap Phase 8).
+  Propagated to overview §3.1, glossary, tokenomics §1/§4, deepbook §1/§10, roadmap Phase 8.
 - **GIX token deferred to post-MVP (2026-06):** v1 ships **without** the native token —
   provider bonds are denominated in **USDC** (`ProviderStake` = `Balance<USDC>`), governance
   is an **`AdminCap`/multisig**, fees are taken in USDC, and there are **no emissions /
@@ -254,7 +275,18 @@ no-fault `InputUnavailable` classification (no provider slash).
 What 1 Compute Credit (1 SCU) buys per market (a bounded request vs N output tokens at the
 tier) and exactly how realized output is metered into SCUs.
 *Source: roadmap.md consolidated list (overview §3 / glossary).*
-**Decision:** _(pending — Shehab)_
+**Decision:** ✅ answered → propagated (2026-06). **GIX sells verified model *output*, not
+raw GPU time**, so **1 SCU = one unit of verified useful output**, defined **per `Market`**:
+LLM markets → 1 SCU = *N* output tokens at the tier (bounded input/context), with the
+attestation binding the **output token count** alongside `output_hash`; non-LLM /
+fixed-shape markets → a bounded request/item (e.g. one image). The **GPU class is a market
+*qualifier*** (fixes the serving hardware tier → speed/SLA/price), **not** the unit sold or
+priced. **Raw GPU-time is explicitly ruled out** as the unit — it is not cryptographically
+verifiable (throttling/sharing/contention) and implies running arbitrary consumer code,
+outside v1's integrity-only, known-model scope; any pure GPU-rental product would be a
+**separate later line with weaker (non-cryptographic) guarantees**. Propagated to overview
+(§1 callout + §3/§3.1), glossary (Compute Credit / SCU / Market / GPU class), tokenomics
+(§1, §4), deepbook-integration (§1, §3.1).
 
 ### E2 🟧 Market granularity / dimension consolidation
 DeepBook research recommends consolidating market dimensions (e.g. collapse fine SLA tiers)

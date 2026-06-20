@@ -15,25 +15,46 @@ exactly as defined here.
 - **USDC** — Circle-native USD Coin on Sui. The **settlement and quote asset** for
   all markets in v1. The unit of account.
 - **Compute Credit** — A fungible Sui coin scoped to a single market. One credit
-  represents one **Standardized Compute Unit** of capacity in that market. Minted by
-  providers against staked capacity, traded on DeepBook, burned on job completion.
-- **Standardized Compute Unit (SCU)** — The normalized unit of inference capacity a
-  single Compute Credit represents in a given market (e.g. a bounded request, or *N*
-  output tokens at the market's tier). Defined per market as a `Market` parameter.
+  represents one **Standardized Compute Unit** of that market. Minted by providers
+  against staked capacity, traded on DeepBook, burned on job completion. **v1/M2:
+  single-use** (the credit is consumed by its buyer's job; the filling provider is the
+  obligated server) — freely-resellable **bearer** credits are a post-MVP milestone
+  (the *tradeable-credits upgrade*).
+- **Standardized Compute Unit (SCU)** — The traded/priced unit: **one unit of verified
+  useful output** of a market's registered model — **not** a unit of GPU time. Defined
+  **per market** as a `Market` parameter: for **LLM markets**, 1 SCU = *N* output
+  tokens at the tier (bounded input/context); for **other markets**, a bounded
+  request/item (e.g. one image). What a buyer purchases is the model's *verified
+  output*; the GPU class only qualifies which hardware serves it. Raw GPU-time is
+  explicitly **not** an SCU (not cryptographically verifiable).
 
 ## Market structure
 
-- **Market** — A standardized capacity class, defined by the tuple
-  `(GPU class, model/runtime tier, SLA class)`. Each market has one Compute Credit
-  type and one DeepBook `Credit/USDC` pool.
-- **GPU class** — Hardware category (e.g. `H100-80GB`, `H200-141GB`). Determines the
-  attestation hardware root and capacity accounting.
+- **Spot exchange (for a perishable commodity)** — GIX's market model. Compute capacity,
+  like electricity, **cannot be hoarded** (an idle GPU-second is lost), so GIX clears a
+  *flow* of present demand against present supply rather than warehousing a stock. In
+  scope: real-time price discovery, market-maker liquidity, hedging. Long-horizon
+  speculation/hoarding is naturally bounded by perishability + credit expiry.
+- **Market** — A standardized **verified-output** class, defined by the tuple
+  `(GPU class, model/runtime tier, SLA class)`. What it sells is the **verified output
+  of its registered model**; the GPU class is a *qualifier*, not the product (see SCU).
+  Each market has one Compute Credit type and one DeepBook `Credit/USDC` pool.
+- **GPU class** — Hardware category (e.g. `H100-80GB`, `H200-141GB`). A **market
+  qualifier**: it fixes the hardware tier that serves the model (and so the
+  speed/SLA/price) and determines the attestation hardware root and capacity
+  accounting. It is **not** the unit sold or priced.
 - **Model/runtime tier** — The specific model + runtime + quantization (e.g.
-  `llama-3.1-70b-int8` on vLLM). Bound to a `ModelRecord`.
+  `llama-3.1-70b-int8` on vLLM). Bound to a `ModelRecord`. This is *what is sold* — the
+  buyer receives this model's verified output.
 - **SLA class** — Latency/availability targets for the market (e.g. `p50<2s`,
   `p99<5s`). Enforced at settlement via attestation timestamps.
 - **Spot price** — The live `Credit/USDC` price discovered by DeepBook matching for a
-  market.
+  market — i.e. the present price of one SCU of verified output.
+- **Tradeable-credits upgrade** — The post-MVP milestone that turns single-use credits
+  into freely-resellable **bearer credits** redeemable against *any* staked provider,
+  adding a dispatch + clearing layer that decouples "who bought" from "who serves." v1/M2
+  ships single-use credits (filling provider = obligated server). See
+  [roadmap](roadmap.md) Phase 8.
 
 ## On-chain objects (Sui `gix` package)
 
@@ -107,9 +128,19 @@ in [protocol/task-lifecycle.md](protocol/task-lifecycle.md).
 
 ## Roles
 
-- **Consumer** — Buys compute: uploads input, places bids, receives verified output.
-- **Provider / Node operator** — Sells compute: posts a bond (USDC in v1; GIX
-  post-MVP), mints credits, runs the node, gets paid or slashed.
+The three participant roles of a spot exchange (see *Spot exchange* above):
+
+- **Consumer / developer** — **Demand side.** Buys to run inference *now* (per-inference
+  / API use case — the anchor demand): uploads input, places bids, receives verified
+  output.
+- **Provider / Node operator** — **Supply side.** Sells capacity: posts a bond (USDC in
+  v1; GIX post-MVP), mints credits, posts asks, runs the node, serves jobs, gets paid or
+  slashed.
+- **Market maker / Liquidity provider** — Posts bids *and* asks to **trade credits and
+  earn the spread**, **without owning a GPU or consuming inference**. Makes the book
+  liquid; the reason GIX matches on a real CLOB (DeepBook). (In v1/M2's single-use-credit
+  model they trade the order book; onward resale of a filled credit arrives with the
+  *tradeable-credits upgrade*.)
 - **Governance** — Manages protocol parameters, measurement/cert allowlists, fee
   schedule, and upgrade authority — via an `AdminCap`/multisig in v1 (token-weighted
   governance is post-MVP). See [tokenomics.md](tokenomics.md).

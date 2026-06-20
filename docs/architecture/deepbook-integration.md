@@ -25,11 +25,22 @@ Pool(Market) = Credit<Market> / USDC
 
 Providers post **asks** (sell `Credit<Market>` for USDC); consumers post **bids** or
 **market orders** (buy `Credit<Market>` with USDC). The clearing price of that pool is
-the market's live **spot price** of compute. A fill is the trigger that creates an
-on-chain `Job` and locks an `Escrow` (see §6).
+the market's live **spot price** of compute — the present price of one SCU of the
+market model's **verified output** (GIX trades *verified inference*, not raw GPU time;
+[overview §1/§3](overview.md)). A fill is the trigger that creates an on-chain `Job`
+and locks an `Escrow` (see §6).
 
 This is fixed canon: tokenized credits matched on DeepBook. A bespoke Move CLOB is
 **not** the v1 design.
+
+> **Why a real CLOB — the three-role spot market.** GIX is a **spot exchange for a
+> perishable commodity** ([overview §3.1](overview.md)) with three roles: **consumers**
+> (demand), **providers** (supply), and **market makers / liquidity providers** who post
+> two-sided quotes to earn the spread **without owning a GPU or consuming inference**.
+> That third role is *the* reason GIX matches on DeepBook rather than a bespoke
+> worker-pool: only a real order book lets a third party supply liquidity it neither
+> produces nor consumes. Real-time price discovery, MM liquidity, and hedging are in
+> scope; hoarding is bounded by perishability + credit expiry.
 
 ```mermaid
 flowchart LR
@@ -165,13 +176,14 @@ conceptually in the **permissionless on-chain fill→Job fallback** (§6.3) to m
 
 Each Market has **exactly one** fungible Compute Credit coin type, e.g.
 `gix::credit::CREDIT<MARKET_H100_LLAMA70B_INT8_P50>` (one-time-witness per market, a
-distinct `Coin<T>`). One credit = **one SCU** for that market — a normalized unit of
-inference capacity defined as a `Market` parameter (a bounded request, or *N* output
-tokens at the market's tier; see [glossary](../glossary.md)).
+distinct `Coin<T>`). One credit = **one SCU** for that market — one unit of the model's
+**verified output** (a bounded request/item, or *N* output tokens at the market's tier;
+see [glossary](../glossary.md)), **not** a unit of GPU time. The GPU class in the market
+tuple only *qualifies* which hardware serves the model.
 
-> Credits are **claims on capacity, not money**. USDC is the money. A `Credit<Market>`
-> is only fungible *within* its market; credits from different markets are different
-> types and cannot be confused on-chain.
+> Credits are **claims on verified output, not money**. USDC is the money. A
+> `Credit<Market>` is only fungible *within* its market; credits from different markets
+> are different types and cannot be confused on-chain.
 
 ### 3.2 Treasury cap & minting authority
 
@@ -556,6 +568,20 @@ paid, independent of how matching happened.
 
 Two lifecycles run in parallel and must stay consistent: the **order** lifecycle (on
 DeepBook) and the **credit** lifecycle (on `gix::credit`).
+
+> **Credit fungibility — single-use now, bearer-resale later (sequencing).** A
+> `Credit<Market>` is fungible *on the book* (it must be, to pool in one DeepBook pool),
+> but in **v1/M2 a filled credit is single-use**: it is consumed by its buyer's `Job`,
+> and the **provider whose ask filled is the obligated server** (assigned-from-fill,
+> single-provider in the demo). This keeps the credit↔server link intact without a
+> dispatch/clearing layer. A **full free-resale secondary market** — *fungible bearer
+> credits* redeemable against **any** staked provider, decoupling "who bought" from "who
+> serves" — is the deliberate post-MVP **tradeable-credits upgrade**
+> ([roadmap](../roadmap.md) Phase 8): it requires a dispatch + clearing layer (job
+> assignment from a provider pool, not from the fill) and is what would let role-3 market
+> makers re-sell a held credit onward, not merely quote the book. Reselling fungible
+> credits *before* that layer exists would break the server↔credit binding, so it is
+> intentionally out of scope until then.
 
 ### 10.1 Reserve vs burn semantics
 

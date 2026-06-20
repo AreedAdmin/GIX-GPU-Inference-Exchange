@@ -12,6 +12,23 @@ defined here. When in doubt, this file wins.
 GIX turns GPU inference into a liquid, exchange-traded commodity. To do that in a
 **production-grade, trustless** way, the protocol must satisfy:
 
+> **What GIX sells — verified model inference, not raw GPU time.** The thing traded
+> on GIX is the **verified output of a *registered model***, not raw GPU hours. A buyer
+> purchases *a model's provably-correct output*; the **GPU class is a market
+> *qualifier*** (it pins which hardware tier serves the model, and thus the
+> speed/SLA/price), **not** the thing sold and **not** the pricing unit. The
+> traded/priced unit is **1 SCU = one unit of verified useful output**, defined
+> **per market** (for LLM markets, *N* output tokens at the tier; for other markets, a
+> bounded request/item such as one image — see §3). This is what makes "paid-for-what-
+> was-run, **provably**" enforceable: the attestation binds the *model* that ran and
+> the *output* it produced. **Raw GPU-time is explicitly ruled out as the unit** —
+> "1 minute of GPU X" is not cryptographically verifiable (throttling, sharing, and
+> contention defeat it) and implies running the consumer's arbitrary code, which is
+> outside v1's integrity-only, known-model scope. A pure GPU-rental product, if ever
+> pursued, is a **separate later product line with explicitly weaker (non-cryptographic)
+> guarantees**, not the core. This resolves open question
+> [E1](../open-ended-questions.md#e1--per-market-scu-definition--metering).
+
 1. **Real-time price discovery** — continuous matching of compute supply and demand
    without auction latency. → DeepBook CLOB.
 2. **Verifiable execution** — a consumer must be paid-for-what-was-run, provably,
@@ -117,12 +134,19 @@ Market = (GPU class, model/runtime tier, SLA class)
 e.g.    (H100-80GB,  llama-3.1-70b-int8,  p50<2s / p99<5s)
 ```
 
+The three coordinates play different roles. The **model/runtime tier** is *what is
+sold* (the registered model whose verified output the buyer receives); the **GPU
+class** is a *market qualifier* that fixes the hardware tier serving that model
+(and therefore speed/SLA/price); the **SLA class** is the latency/availability
+contract. **What trades is verified model output — never raw GPU time** (see §1).
+
 Each market has:
 
 - A fungible **Compute Credit** coin type (`gix::credit`). One credit represents a
   **Standardized Compute Unit (SCU)** for that market — a normalized unit of
-  inference capacity (e.g. *N* output tokens at the market's tier, or one bounded
-  request). The SCU definition is a market parameter.
+  **verified useful output** (e.g. *N* output tokens at the market's tier, or one
+  bounded request/item such as one image), **not** a unit of GPU time. The SCU
+  definition is a market parameter.
 - A **DeepBook pool**: `Credit<Market> / USDC`. Providers post asks (sell credits),
   consumers post bids (buy credits). The fill price is the spot price of compute for
   that market.
@@ -135,6 +159,45 @@ job is performed. Credits are claims on capacity, not money; USDC is the money. 
 > high-frequency on-chain CLOB. Representing capacity as a fungible coin lets GIX
 > reuse DeepBook's matching, price-time priority, and liquidity primitives rather
 > than reimplementing an order book in Move.
+
+### 3.1 Market structure — a spot exchange for a perishable commodity
+
+GIX is a **spot exchange for a perishable commodity**. The closest analogy is an
+**electricity / energy market**: compute capacity, like power, **cannot be hoarded** —
+an idle GPU-second is lost forever the moment it passes. That perishability is the
+defining economic property of the market and shapes every design choice below.
+
+Three participant **roles** make the market work:
+
+1. **Consumers / developers (demand side).** They buy to **run inference now** — the
+   per-inference / API use case. This is the **anchor demand** the whole exchange
+   exists to serve.
+2. **Providers (supply side).** They sell capacity: post asks, serve dispatched jobs,
+   and are paid (or slashed) on the verified result.
+3. **Market makers / liquidity providers.** They **trade credits** — posting bids *and*
+   asks to earn the spread — **without owning a GPU or consuming inference**. They make
+   the book liquid and tighten spreads. **This is precisely why GIX matches on DeepBook
+   (a real CLOB)** rather than a bespoke worker-pool: a real order book is what lets a
+   third party provide liquidity it neither produces nor consumes.
+
+What is **in scope**: real-time **price discovery**, **market-maker liquidity**, and
+**hedging** against future compute cost. What is **naturally bounded**, not by rule but
+by the nature of the good: **long-horizon speculation / hoarding** — because capacity
+is perishable *and* credits carry an **expiry** (consistent with the long-expiry
+decision in [A4](../open-ended-questions.md#a4--credit-expiry-window-per-market)), there
+is no durable inventory to corner. The exchange clears a flow, it does not warehouse a
+stock.
+
+> **Sequencing — single-use credits now, tradeable credits later.** v1/M2 ships a live
+> DeepBook order book with per-inference purchasing backed by **single-use credits**:
+> the **seller is the obligated server** (assigned-from-fill; the maker whose ask filled
+> is bound to deliver, single-provider in the demo). A **full free-resale secondary
+> market** — *fungible bearer credits* redeemable against **any** staked provider, with
+> a dispatch + clearing layer that decouples "who bought" from "who serves" — is a
+> **deliberate later milestone** (the **"tradeable-credits upgrade"**; see
+> [roadmap](../roadmap.md) Phase 8 and [deepbook §10](deepbook-integration.md)). Until
+> then, role 3 (market makers) trade the *order book*, but a filled credit is consumed
+> by its buyer, not re-sold onward.
 
 ---
 

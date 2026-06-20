@@ -207,6 +207,14 @@ Sequenced by demand, not committed to dates:
   bootstrap incentives ([tokenomics](tokenomics.md) §3). v1 deliberately ships
   *without* the token (USDC bonds + `AdminCap` governance); this phase is where
   B1/T-ECON-4/T-ECON-6 re-arm and must be closed before launch.
+- **Tradeable-credits upgrade (secondary market)** — turn v1/M2's **single-use**
+  credits into freely-resellable **fungible bearer credits** redeemable against *any*
+  staked provider, adding a **dispatch + clearing layer** that decouples "who bought"
+  from "who serves." v1/M2 ships single-use credits where the **filling provider is the
+  obligated server** (assigned-from-fill); this milestone is what lets market-maker
+  liquidity providers re-sell a held credit onward rather than only quote the order book.
+  ([overview §3.1](architecture/overview.md), [deepbook §10](architecture/deepbook-integration.md),
+  [tokenomics §4](tokenomics.md)).
 - **Confidential markets** — TEE-isolated I/O for data confidentiality (lifts the v1
   integrity-only limitation).
 - **zkML verifier backend** — add a zero-knowledge `AttestationRecord` type behind the
