@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" role="img" aria-label="Key functionality: a drop-in OpenAI-compatible API backed by verifiable, neutral, pay-per-inference compute settled on Sui.">
+  <defs>
+    <pattern id="grid4" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ECEFF3" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1280" height="720" fill="#FFFFFF"/>
+  <rect width="1280" height="720" fill="url(#grid4)"/>
+
+  <!-- header -->
+  <text x="64" y="74" font-size="22" font-weight="800" letter-spacing="2" fill="#0E1116">GIX</text>
+  <text x="1216" y="74" text-anchor="end" font-size="12.5" letter-spacing="2.5" fill="#79828F" font-family="ui-monospace,Menlo,monospace">KEY&#160;FUNCTIONALITY&#160;·&#160;04</text>
+  <line x1="64" y1="100" x2="1216" y2="100" stroke="#E4E8ED" stroke-width="1.5"/>
+  <text x="64" y="142" font-size="27" font-weight="700" fill="#0E1116">Plug in like any inference API — provably served</text>
+  <text x="64" y="166" font-size="15.5" fill="#79828F">One endpoint for AI apps. The crypto, matching, and settlement are abstracted away.</text>
+
+  <!-- API card -->
+  <rect x="64" y="196" width="520" height="300" rx="12" fill="#0E1116" stroke="#0E1116"/>
+  <circle cx="92" cy="224" r="5" fill="#3A424E"/><circle cx="110" cy="224" r="5" fill="#3A424E"/><circle cx="128" cy="224" r="5" fill="#3A424E"/>
+  <text x="560" y="229" text-anchor="end" font-size="11.5" fill="#79828F" font-family="ui-monospace,Menlo,monospace">drop-in</text>
+  <line x1="64" y1="244" x2="584" y2="244" stroke="#21262E"/>
+  <g font-family="ui-monospace,'SF Mono',Menlo,monospace" font-size="14.5">
+    <text x="88" y="282" fill="#7FA7FF">const</text><text x="138" y="282" fill="#E6EAF0"> gix = </text><text x="206" y="282" fill="#7FA7FF">new</text><text x="240" y="282" fill="#E6EAF0"> OpenAI({</text>
+    <text x="112" y="308" fill="#9AA2AD">baseURL:</text><text x="196" y="308" fill="#9BE3B4">"…/gix/v1"</text><text x="296" y="308" fill="#E6EAF0">,</text>
+    <text x="112" y="334" fill="#9AA2AD">apiKey:</text><text x="196" y="334" fill="#9BE3B4">GIX_KEY</text><text x="270" y="334" fill="#E6EAF0">,</text>
+    <text x="88" y="360" fill="#E6EAF0">})</text>
+    <text x="88" y="396" fill="#7FA7FF">await</text><text x="140" y="396" fill="#E6EAF0"> gix.chat.completions.create({</text>
+    <text x="112" y="422" fill="#9AA2AD">model:</text><text x="180" y="422" fill="#9BE3B4">"llama-3.1-8b@H100"</text><text x="372" y="422" fill="#E6EAF0">,</text>
+    <text x="112" y="448" fill="#9AA2AD">messages</text><text x="196" y="448" fill="#E6EAF0">,</text>
+    <text x="88" y="474" fill="#E6EAF0">})</text>
+  </g>
+  <line x1="64" y1="492" x2="584" y2="492" stroke="#21262E"/>
+  <text x="324" y="496" text-anchor="middle" font-size="12" fill="#9BE3B4" font-family="ui-monospace,Menlo,monospace" dy="-7">↳ matched · run in TEE · verified · settled on-chain</text>
+
+  <!-- feature grid 2x3 -->
+  <g>
+    <!-- row 1 -->
+    <rect x="620" y="196" width="290" height="92" rx="10" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <path d="M652 226 l16 -8 l16 8 v12 c0 12 -8 18 -16 22 c-8 -4 -16 -10 -16 -22 z" fill="none" stroke="#2D5BE3" stroke-width="2"/>
+    <text x="700" y="234" font-size="15.5" font-weight="700" fill="#0E1116">Verifiable execution</text>
+    <text x="700" y="256" font-size="12.5" fill="#5B6573">hardware-attested, checked on-chain</text>
+
+    <rect x="926" y="196" width="290" height="92" rx="10" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <g stroke="#2D5BE3" stroke-width="2" fill="none"><line x1="960" y1="244" x2="960" y2="216"/><line x1="970" y1="244" x2="970" y2="224"/><line x1="980" y1="244" x2="980" y2="210"/><line x1="952" y1="244" x2="984" y2="244"/></g>
+    <text x="1006" y="234" font-size="15.5" font-weight="700" fill="#0E1116">Neutral spot market</text>
+    <text x="1006" y="256" font-size="12.5" fill="#5B6573">real CLOB price, not a list price</text>
+
+    <!-- row 2 -->
+    <rect x="620" y="300" width="290" height="92" rx="10" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <circle cx="668" cy="332" r="15" fill="none" stroke="#2D5BE3" stroke-width="2"/><text x="668" y="338" text-anchor="middle" font-size="15" font-weight="800" fill="#2D5BE3">$</text>
+    <text x="700" y="338" font-size="15.5" font-weight="700" fill="#0E1116">Pay-per-inference</text>
+    <text x="700" y="360" font-size="12.5" fill="#5B6573">escrow per job, no idle reservations</text>
+
+    <rect x="926" y="300" width="290" height="92" rx="10" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <g stroke="#2D5BE3" stroke-width="2" fill="none"><rect x="952" y="316" width="22" height="28" rx="2"/><line x1="957" y1="324" x2="969" y2="324"/><line x1="957" y1="332" x2="969" y2="332"/></g>
+    <text x="1006" y="338" font-size="15.5" font-weight="700" fill="#0E1116">Tamper-evident audit</text>
+    <text x="1006" y="360" font-size="12.5" fill="#5B6573">replay any job from Sui + Walrus</text>
+
+    <!-- row 3 -->
+    <rect x="620" y="404" width="290" height="92" rx="10" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <g stroke="#2D5BE3" stroke-width="2" fill="none"><circle cx="662" cy="436" r="9"/><line x1="669" y1="443" x2="684" y2="458"/><line x1="678" y1="452" x2="684" y2="446"/></g>
+    <text x="700" y="442" font-size="15.5" font-weight="700" fill="#0E1116">Permissionless</text>
+    <text x="700" y="464" font-size="12.5" fill="#5B6573">anyone provides or consumes</text>
+
+    <rect x="926" y="404" width="290" height="92" rx="10" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <path d="M964 414 l-14 26 h12 l-4 22 l16 -28 h-12 z" fill="none" stroke="#2D5BE3" stroke-width="2" stroke-linejoin="round"/>
+    <text x="1006" y="442" font-size="15.5" font-weight="700" fill="#0E1116">Sui-settled</text>
+    <text x="1006" y="464" font-size="12.5" fill="#5B6573">sub-second finality, parallel jobs</text>
+  </g>
+
+  <!-- bottom positioning strip -->
+  <rect x="64" y="528" width="1152" height="84" rx="12" fill="#FBFCFE" stroke="#2D5BE3" stroke-width="1.5"/>
+  <text x="88" y="566" font-size="16" font-weight="800" fill="#1A2A66">Cheaper than renting a GPU. Verifiable, unlike a black-box API.</text>
+  <text x="88" y="592" font-size="13" fill="#3D5AAE">The wedge: trust-sensitive &amp; agentic workloads, bursty demand, and long-tail models — where a neutral, provable market wins.</text>
+
+  <!-- footer -->
+  <text x="64" y="668" font-size="12" letter-spacing="1.5" fill="#9AA2AD" font-family="ui-monospace,Menlo,monospace">CONSUMER&#160;SDK&#160;·&#160;PROVIDER&#160;NODE&#160;·&#160;OPENAI-COMPATIBLE&#160;GATEWAY</text>
+  <text x="1216" y="668" text-anchor="end" font-size="12" letter-spacing="1.5" fill="#9AA2AD" font-family="ui-monospace,Menlo,monospace">USDC&#160;IN&#160;·&#160;TOKENS&#160;OUT</text>
+</svg>

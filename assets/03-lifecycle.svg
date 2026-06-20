@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" role="img" aria-label="Job lifecycle: order and match, escrow, dispatch, run in TEE, attest, verify. Pass settles and pays the provider; fail refunds the consumer and slashes the provider. Four checks are verified on-chain.">
+  <defs>
+    <pattern id="grid3" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ECEFF3" stroke-width="1"/>
+    </pattern>
+    <marker id="a3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#79828F"/></marker>
+    <marker id="a3g" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#1F9D6B"/></marker>
+    <marker id="a3r" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#D1495B"/></marker>
+  </defs>
+
+  <rect width="1280" height="720" fill="#FFFFFF"/>
+  <rect width="1280" height="720" fill="url(#grid3)"/>
+
+  <!-- header -->
+  <text x="64" y="74" font-size="22" font-weight="800" letter-spacing="2" fill="#0E1116">GIX</text>
+  <text x="1216" y="74" text-anchor="end" font-size="12.5" letter-spacing="2.5" fill="#79828F" font-family="ui-monospace,Menlo,monospace">LIFECYCLE&#160;&amp;&#160;TRUST&#160;·&#160;03</text>
+  <line x1="64" y1="100" x2="1216" y2="100" stroke="#E4E8ED" stroke-width="1.5"/>
+  <text x="64" y="142" font-size="27" font-weight="700" fill="#0E1116">Paid only for proven work</text>
+  <text x="64" y="166" font-size="15.5" fill="#79828F">Escrow releases only on a verified attestation. A bad or missing proof refunds the consumer and slashes the provider.</text>
+
+  <text x="64" y="200" font-size="11.5" letter-spacing="2" fill="#9AA2AD" font-family="ui-monospace,Menlo,monospace">JOB&#160;LIFECYCLE</text>
+
+  <!-- pipeline pills -->
+  <g>
+    <rect x="64"   y="212" width="168" height="64" rx="9" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <text x="148" y="240" text-anchor="middle" font-size="14.5" font-weight="600" fill="#1A1F2B">Order + match</text>
+    <text x="148" y="259" text-anchor="middle" font-size="11" fill="#79828F" font-family="ui-monospace,Menlo,monospace">DeepBook fill</text>
+
+    <rect x="260" y="212" width="168" height="64" rx="9" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <text x="344" y="240" text-anchor="middle" font-size="14.5" font-weight="600" fill="#1A1F2B">Escrow</text>
+    <text x="344" y="259" text-anchor="middle" font-size="11" fill="#79828F" font-family="ui-monospace,Menlo,monospace">lock USDC</text>
+
+    <rect x="456" y="212" width="168" height="64" rx="9" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <text x="540" y="240" text-anchor="middle" font-size="14.5" font-weight="600" fill="#1A1F2B">Dispatch</text>
+    <text x="540" y="259" text-anchor="middle" font-size="11" fill="#79828F" font-family="ui-monospace,Menlo,monospace">to provider</text>
+
+    <rect x="652" y="212" width="168" height="64" rx="9" fill="#EAF0FF" stroke="#2D5BE3"/>
+    <text x="736" y="240" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1A2A66">Run · TEE</text>
+    <text x="736" y="259" text-anchor="middle" font-size="11" fill="#3D5AAE" font-family="ui-monospace,Menlo,monospace">GPU inference</text>
+
+    <rect x="848" y="212" width="168" height="64" rx="9" fill="#F6F8FA" stroke="#D2D8E0"/>
+    <text x="932" y="240" text-anchor="middle" font-size="14.5" font-weight="600" fill="#1A1F2B">Attest</text>
+    <text x="932" y="259" text-anchor="middle" font-size="11" fill="#79828F" font-family="ui-monospace,Menlo,monospace">signed quote</text>
+
+    <rect x="1044" y="212" width="168" height="64" rx="9" fill="#FFFFFF" stroke="#2D5BE3" stroke-width="2"/>
+    <text x="1128" y="240" text-anchor="middle" font-size="14.5" font-weight="800" fill="#2D5BE3">◇ Verify</text>
+    <text x="1128" y="259" text-anchor="middle" font-size="11" fill="#3D5AAE" font-family="ui-monospace,Menlo,monospace">on-chain gate</text>
+  </g>
+  <!-- pipeline arrows -->
+  <g stroke="#79828F" stroke-width="1.5">
+    <line x1="232" y1="244" x2="259" y2="244" marker-end="url(#a3)"/>
+    <line x1="428" y1="244" x2="455" y2="244" marker-end="url(#a3)"/>
+    <line x1="624" y1="244" x2="651" y2="244" marker-end="url(#a3)"/>
+    <line x1="820" y1="244" x2="847" y2="244" marker-end="url(#a3)"/>
+    <line x1="1016" y1="244" x2="1043" y2="244" marker-end="url(#a3)"/>
+  </g>
+
+  <!-- branch bus from Verify -->
+  <path d="M1128 276 L1128 304 L794 304" fill="none" stroke="#79828F" stroke-width="1.5"/>
+  <line x1="794" y1="304" x2="794" y2="328" stroke="#1F9D6B" stroke-width="2" marker-end="url(#a3g)"/>
+  <line x1="1082" y1="304" x2="1082" y2="328" stroke="#D1495B" stroke-width="2" marker-end="url(#a3r)"/>
+  <text x="806" y="322" font-size="11.5" fill="#1F9D6B" font-family="ui-monospace,Menlo,monospace">pass</text>
+  <text x="1094" y="322" font-size="11.5" fill="#D1495B" font-family="ui-monospace,Menlo,monospace">fail</text>
+
+  <!-- outcome cards -->
+  <text x="664" y="350" font-size="11.5" letter-spacing="2" fill="#9AA2AD" font-family="ui-monospace,Menlo,monospace">OUTCOME</text>
+  <rect x="664" y="356" width="260" height="92" rx="10" fill="#E9F7F0" stroke="#1F9D6B" stroke-width="1.5"/>
+  <text x="684" y="392" font-size="16" font-weight="800" fill="#137A52">✓ SETTLE</text>
+  <text x="684" y="416" font-size="13" fill="#1A1F2B">Provider paid − fee</text>
+  <text x="684" y="435" font-size="12.5" fill="#5B6573">credits burned · audit retained</text>
+
+  <rect x="952" y="356" width="260" height="92" rx="10" fill="#FBECEE" stroke="#D1495B" stroke-width="1.5"/>
+  <text x="972" y="392" font-size="16" font-weight="800" fill="#A8324A">✗ REFUND + SLASH</text>
+  <text x="972" y="416" font-size="13" fill="#1A1F2B">Consumer made whole</text>
+  <text x="972" y="435" font-size="12.5" fill="#5B6573">provider stake slashed</text>
+
+  <!-- checks panel -->
+  <rect x="64" y="478" width="1152" height="150" rx="12" fill="#FBFCFE" stroke="#2D5BE3" stroke-width="1.5"/>
+  <text x="88" y="512" font-size="16" font-weight="800" fill="#1A2A66">Verified on-chain</text>
+  <text x="88" y="534" font-size="13" fill="#3D5AAE">no trust required — the contract checks the proof, not an operator</text>
+
+  <g font-size="13.5" fill="#1A1F2B">
+    <text x="88"  y="576" font-size="15" fill="#2D5BE3" font-weight="800">✓</text>
+    <text x="110" y="576" font-weight="600">Vendor signature chain</text>
+    <text x="110" y="598" font-size="12.5" fill="#79828F">→ governance-pinned roots</text>
+
+    <text x="372" y="576" font-size="15" fill="#2D5BE3" font-weight="800">✓</text>
+    <text x="394" y="576" font-weight="600">Measurement allowlisted</text>
+    <text x="394" y="598" font-size="12.5" fill="#79828F">the right model ran</text>
+
+    <text x="656" y="576" font-size="15" fill="#2D5BE3" font-weight="800">✓</text>
+    <text x="678" y="576" font-weight="600">Hashes bind the Job</text>
+    <text x="678" y="598" font-size="12.5" fill="#79828F">model · input · output</text>
+
+    <text x="940" y="576" font-size="15" fill="#2D5BE3" font-weight="800">✓</text>
+    <text x="962" y="576" font-weight="600">Within SLA · fresh nonce</text>
+    <text x="962" y="598" font-size="12.5" fill="#79828F">no replay, no late quote</text>
+  </g>
+
+  <!-- footer -->
+  <text x="64" y="668" font-size="12" letter-spacing="1.5" fill="#9AA2AD" font-family="ui-monospace,Menlo,monospace">v1:&#160;HARDWARE&#160;TEE&#160;ATTESTATION&#160;·&#160;INTEGRITY-FIRST</text>
+  <text x="1216" y="668" text-anchor="end" font-size="12" letter-spacing="1.5" fill="#9AA2AD" font-family="ui-monospace,Menlo,monospace">zkML&#160;=&#160;PLUGGABLE&#160;FUTURE&#160;BACKEND</text>
+</svg>
