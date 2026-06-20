@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gix.local/schemas/latency-profiles.schema.json",
+  "title": "GIX per-market latency / SLA / SCU profile",
+  "type": "object",
+  "required": ["markets"],
+  "additionalProperties": true,
+  "properties": {
+    "description": { "type": "string" },
+    "units": { "type": "object" },
+    "deadlinesNote": { "type": "string" },
+    "markets": {
+      "type": "object",
+      "description": "Keyed by market name (must match deployment.json .markets[].name and scenario .markets[]).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["scuTokens", "sla", "deadlines", "latencyModel"],
+        "properties": {
+          "gpuClass": { "type": "string" },
+          "model": { "type": "string" },
+          "creditTypeHint": { "type": "string", "description": "Human hint only; the real Credit type comes from deployment.json." },
+          "scuTokens": { "type": "integer", "minimum": 1, "description": "Output tokens that equal 1 SCU (E1)." },
+          "sla": {
+            "type": "object",
+            "required": ["p50Ms", "p99Ms"],
+            "properties": {
+              "p50Ms": { "type": "number", "minimum": 0 },
+              "p99Ms": { "type": "number", "minimum": 0 }
+            }
+          },
+          "deadlines": {
+            "type": "object",
+            "required": ["tAckSec", "tExecSec", "tAttSec"],
+            "properties": {
+              "tAckSec": { "type": "number", "minimum": 0 },
+              "tExecSec": { "type": "number", "minimum": 0 },
+              "tAttSec": { "type": "number", "minimum": 0 }
+            }
+          },
+          "latencyModel": {
+            "type": "object",
+            "required": ["baseMs", "perTokenMs"],
+            "description": "Simulated execution latency = baseMs + perTokenMs * outputTokens, plus jitter (>= jitterFloorMs) scaled by scenario.providerProfile.latencyJitter.",
+            "properties": {
+              "baseMs": { "type": "number", "minimum": 0 },
+              "perTokenMs": { "type": "number", "minimum": 0 },
+              "jitterFloorMs": { "type": "number", "minimum": 0 }
+            }
+          },
+          "priceHintUsdcPerScu": { "type": "number", "minimum": 0 },
+          "typicalOutputTokens": {
+            "type": "object",
+            "properties": {
+              "p50": { "type": "number" },
+              "p99": { "type": "number" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

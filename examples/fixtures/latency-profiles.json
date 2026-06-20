@@ -1,0 +1,45 @@
+{
+  "$schema": "./latency-profiles.schema.json",
+  "description": "Per-market mock latency / SLA / SCU profile so simulated providers in the harness produce realistic timings, and so the harness knows each market's SLA budget and lifecycle deadlines. Values are illustrative MVP defaults derived from the Batch-decision table in docs/open-ended-questions.md (E1 token-SCU, C1 deadlines, B4 slash classes) — NOT benchmarked. Latency is modeled as base + perToken * outputTokens, with jitter applied per scenario providerProfile.latencyJitter.",
+  "units": {
+    "latency": "ms",
+    "scu": "output tokens per 1 SCU (E1: token-based SCU for LLM markets)",
+    "price": "USDC per SCU"
+  },
+  "deadlinesNote": "Lifecycle deadlines follow Batch-decision C1 (interactive class): t_ack ~= 5s, t_exec ~= SLA p99 + 10s, t_att ~= 30s. These are the windows the harness uses to decide MISSING vs LATE attestation when injecting faults.",
+  "markets": {
+    "H100-llama3.1-8b-int8": {
+      "gpuClass": "H100-80GB",
+      "model": "llama-3.1-8b-int8",
+      "creditTypeHint": "M_H100_LLAMA8B",
+      "scuTokens": 1000,
+      "sla": { "p50Ms": 1200, "p99Ms": 5000 },
+      "deadlines": { "tAckSec": 5, "tExecSec": 15, "tAttSec": 30 },
+      "latencyModel": { "baseMs": 220, "perTokenMs": 1.6, "jitterFloorMs": 40 },
+      "priceHintUsdcPerScu": 0.012,
+      "typicalOutputTokens": { "p50": 120, "p99": 900 }
+    },
+    "H100-llama3.1-70b-int8": {
+      "gpuClass": "H100-80GB",
+      "model": "llama-3.1-70b-int8",
+      "creditTypeHint": "M_H100_LLAMA70B",
+      "scuTokens": 1000,
+      "sla": { "p50Ms": 2200, "p99Ms": 8000 },
+      "deadlines": { "tAckSec": 5, "tExecSec": 18, "tAttSec": 30 },
+      "latencyModel": { "baseMs": 480, "perTokenMs": 4.8, "jitterFloorMs": 80 },
+      "priceHintUsdcPerScu": 0.028,
+      "typicalOutputTokens": { "p50": 160, "p99": 1000 }
+    },
+    "A100-mixtral-8x7b-int8": {
+      "gpuClass": "A100-80GB",
+      "model": "mixtral-8x7b-int8",
+      "creditTypeHint": "M_A100_MIXTRAL",
+      "scuTokens": 1000,
+      "sla": { "p50Ms": 1800, "p99Ms": 7000 },
+      "deadlines": { "tAckSec": 5, "tExecSec": 17, "tAttSec": 30 },
+      "latencyModel": { "baseMs": 360, "perTokenMs": 3.4, "jitterFloorMs": 60 },
+      "priceHintUsdcPerScu": 0.020,
+      "typicalOutputTokens": { "p50": 150, "p99": 950 }
+    }
+  }
+}

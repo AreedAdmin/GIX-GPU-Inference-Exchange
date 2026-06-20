@@ -1,0 +1,39 @@
+{
+  "$schema": "./scenario.schema.json",
+  "name": "baseline",
+  "description": "Healthy steady-state market: mostly-honest providers, modest order flow, low fault rates. The reference scenario for `make demo`. Most jobs should settle.",
+  "seed": 42,
+  "durationSec": 60,
+  "orderRatePerMin": 120,
+  "providers": 2,
+  "consumers": 3,
+  "markets": ["H100-llama3.1-8b-int8"],
+  "qty": {
+    "distribution": "uniform-int",
+    "min": 1,
+    "max": 20,
+    "unit": "SCU"
+  },
+  "price": {
+    "distribution": "normal",
+    "mean": 0.012,
+    "stddev": 0.002,
+    "min": 0.006,
+    "max": 0.030,
+    "unit": "USDC_per_SCU"
+  },
+  "faults": {
+    "skipAttest": 0.02,
+    "lateAttest": 0.03,
+    "wrongOutput": 0.01,
+    "consumerAbandon": 0.01
+  },
+  "providerProfile": {
+    "honestFraction": 0.95,
+    "latencyJitter": 0.15
+  },
+  "settlement": {
+    "autoExpireOverdue": true,
+    "settleDelaySec": 0
+  }
+}

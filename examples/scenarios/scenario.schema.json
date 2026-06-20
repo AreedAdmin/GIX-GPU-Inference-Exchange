@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gix.local/schemas/scenario.schema.json",
+  "title": "GIX M1 stream scenario",
+  "description": "Synthetic-data stream config consumed by the harness (workstream B) via `npm run stream -- --scenario <path>`. Matches docs/mvp-m1-integration-contract.md §B: order rate, #providers, #consumers, qty/price distributions, fault-injection rates.",
+  "type": "object",
+  "required": ["name", "orderRatePerMin", "durationSec", "providers", "consumers", "qty", "price", "faults"],
+  "additionalProperties": true,
+  "properties": {
+    "name": { "type": "string", "description": "Scenario id; surfaced in the run summary." },
+    "description": { "type": "string" },
+    "seed": { "type": "integer", "description": "RNG seed for reproducible synthetic streams." },
+    "durationSec": { "type": "number", "minimum": 1, "description": "Wall-clock duration of the stream." },
+    "orderRatePerMin": { "type": "number", "minimum": 0, "description": "Target consumer order arrival rate (orders/min); Poisson if the harness models arrivals stochastically." },
+    "providers": { "type": "integer", "minimum": 1, "description": "Number of simulated provider accounts to stake + mint + post asks." },
+    "consumers": { "type": "integer", "minimum": 1, "description": "Number of simulated consumer accounts placing orders." },
+    "markets": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Market names to trade in; must correspond to markets present in deployment.json (matched by .markets[].name). If a name is absent on-chain the harness should skip or warn."
+    },
+    "qty": {
+      "type": "object",
+      "description": "Order quantity distribution, in SCU.",
+      "required": ["distribution"],
+      "properties": {
+        "distribution": { "enum": ["uniform-int", "normal", "lognormal", "fixed"] },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "stddev": { "type": "number" },
+        "median": { "type": "number" },
+        "sigma": { "type": "number" },
+        "value": { "type": "number" },
+        "unit": { "const": "SCU" }
+      }
+    },
+    "price": {
+      "type": "object",
+      "description": "Limit/market price distribution, in USDC per SCU. Used to size bids/asks and escrow.",
+      "required": ["distribution"],
+      "properties": {
+        "distribution": { "enum": ["uniform", "normal", "lognormal", "fixed"] },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "stddev": { "type": "number" },
+        "value": { "type": "number" },
+        "unit": { "const": "USDC_per_SCU" }
+      }
+    },
+    "faults": {
+      "type": "object",
+      "description": "Per-job fault-injection probabilities (0..1). Each maps to a lifecycle fault the harness induces so the corresponding slash/refund path fires.",
+      "properties": {
+        "skipAttest":      { "type": "number", "minimum": 0, "maximum": 1, "description": "Provider never submits attestation -> MISSING attestation -> 100% bond-share slash (B4)." },
+        "lateAttest":      { "type": "number", "minimum": 0, "maximum": 1, "description": "Attestation arrives after the SLA/attest deadline -> SLA breach -> graded 10-50% slash (B4)." },
+        "wrongOutput":     { "type": "number", "minimum": 0, "maximum": 1, "description": "Attested output_hash/measurement is wrong -> INVALID attestation -> 100% bond share + flat penalty (B4)." },
+        "consumerAbandon": { "type": "number", "minimum": 0, "maximum": 1, "description": "Consumer locks escrow then abandons -> D2 forfeit (~10%) + refund." }
+      }
+    },
+    "providerProfile": {
+      "type": "object",
+      "description": "Aggregate provider behavior knobs.",
+      "properties": {
+        "honestFraction": { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction of providers that never intentionally fault (faults still apply per-job to the rest)." },
+        "latencyJitter":  { "type": "number", "minimum": 0, "description": "Relative jitter applied to the per-market latency profile (see examples/fixtures/latency-profiles.json)." }
+      }
+    },
+    "settlement": {
+      "type": "object",
+      "description": "How the harness drives settlement/expiry.",
+      "properties": {
+        "autoExpireOverdue": { "type": "boolean", "description": "Call expire_and_resolve on jobs past deadline." },
+        "settleDelaySec": { "type": "number", "minimum": 0, "description": "Artificial delay before submitting attestation, to model execution time." },
+        "maxConcurrentInFlight": { "type": "integer", "minimum": 1, "description": "Cap on simultaneously-open jobs (back-pressure)." }
+      }
+    }
+  }
+}

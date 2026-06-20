@@ -1,0 +1,39 @@
+{
+  "$schema": "./scenario.schema.json",
+  "name": "fault-heavy",
+  "description": "Adversarial / chaos scenario: high fault-injection rates to exercise every slash path (missing, SLA-breach, invalid) and the refund path. Use to watch slashing and refunds fire live. Slash counts should be non-trivial.",
+  "seed": 1337,
+  "durationSec": 90,
+  "orderRatePerMin": 90,
+  "providers": 4,
+  "consumers": 4,
+  "markets": ["H100-llama3.1-8b-int8", "H100-llama3.1-70b-int8"],
+  "qty": {
+    "distribution": "uniform-int",
+    "min": 1,
+    "max": 30,
+    "unit": "SCU"
+  },
+  "price": {
+    "distribution": "normal",
+    "mean": 0.018,
+    "stddev": 0.005,
+    "min": 0.006,
+    "max": 0.060,
+    "unit": "USDC_per_SCU"
+  },
+  "faults": {
+    "skipAttest": 0.20,
+    "lateAttest": 0.25,
+    "wrongOutput": 0.15,
+    "consumerAbandon": 0.05
+  },
+  "providerProfile": {
+    "honestFraction": 0.55,
+    "latencyJitter": 0.45
+  },
+  "settlement": {
+    "autoExpireOverdue": true,
+    "settleDelaySec": 0
+  }
+}

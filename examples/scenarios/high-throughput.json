@@ -1,0 +1,42 @@
+{
+  "$schema": "./scenario.schema.json",
+  "name": "high-throughput",
+  "description": "Load / throughput scenario: high order rate across many parties and markets to stress the create-job -> attest -> settle pipeline and exercise Sui's parallel execution on disjoint Job objects. Low fault rates so settlement dominates.",
+  "seed": 7,
+  "durationSec": 120,
+  "orderRatePerMin": 1200,
+  "providers": 8,
+  "consumers": 16,
+  "markets": ["H100-llama3.1-8b-int8", "H100-llama3.1-70b-int8", "A100-mixtral-8x7b-int8"],
+  "qty": {
+    "distribution": "lognormal",
+    "median": 8,
+    "sigma": 0.6,
+    "min": 1,
+    "max": 50,
+    "unit": "SCU"
+  },
+  "price": {
+    "distribution": "normal",
+    "mean": 0.012,
+    "stddev": 0.003,
+    "min": 0.004,
+    "max": 0.040,
+    "unit": "USDC_per_SCU"
+  },
+  "faults": {
+    "skipAttest": 0.01,
+    "lateAttest": 0.02,
+    "wrongOutput": 0.005,
+    "consumerAbandon": 0.005
+  },
+  "providerProfile": {
+    "honestFraction": 0.98,
+    "latencyJitter": 0.10
+  },
+  "settlement": {
+    "autoExpireOverdue": true,
+    "settleDelaySec": 0,
+    "maxConcurrentInFlight": 256
+  }
+}

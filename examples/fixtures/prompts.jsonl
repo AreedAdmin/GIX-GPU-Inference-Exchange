@@ -1,0 +1,25 @@
+{"id": "p-0001", "category": "qa", "prompt": "What is the capital of France?", "approxInputTokens": 8, "expectedOutputTokens": 12}
+{"id": "p-0002", "category": "qa", "prompt": "Explain the difference between TCP and UDP in two sentences.", "approxInputTokens": 14, "expectedOutputTokens": 60}
+{"id": "p-0003", "category": "summarize", "prompt": "Summarize the plot of Romeo and Juliet in 50 words.", "approxInputTokens": 13, "expectedOutputTokens": 55}
+{"id": "p-0004", "category": "code", "prompt": "Write a Python function that returns the nth Fibonacci number iteratively.", "approxInputTokens": 14, "expectedOutputTokens": 90}
+{"id": "p-0005", "category": "reasoning", "prompt": "If a train travels 60 km in 45 minutes, what is its speed in km/h?", "approxInputTokens": 19, "expectedOutputTokens": 40}
+{"id": "p-0006", "category": "qa", "prompt": "Name three renewable energy sources.", "approxInputTokens": 7, "expectedOutputTokens": 20}
+{"id": "p-0007", "category": "translate", "prompt": "Translate 'Good morning, how are you?' into Spanish.", "approxInputTokens": 12, "expectedOutputTokens": 10}
+{"id": "p-0008", "category": "code", "prompt": "Explain what a hash map is and its average-case lookup complexity.", "approxInputTokens": 14, "expectedOutputTokens": 80}
+{"id": "p-0009", "category": "summarize", "prompt": "Give a one-paragraph overview of how photosynthesis works.", "approxInputTokens": 12, "expectedOutputTokens": 110}
+{"id": "p-0010", "category": "reasoning", "prompt": "A bat and a ball cost $1.10 together. The bat costs $1 more than the ball. How much is the ball?", "approxInputTokens": 30, "expectedOutputTokens": 45}
+{"id": "p-0011", "category": "creative", "prompt": "Write a haiku about distributed systems.", "approxInputTokens": 9, "expectedOutputTokens": 25}
+{"id": "p-0012", "category": "qa", "prompt": "What year did the first iPhone launch?", "approxInputTokens": 9, "expectedOutputTokens": 8}
+{"id": "p-0013", "category": "code", "prompt": "What does the SQL GROUP BY clause do? Give a short example.", "approxInputTokens": 15, "expectedOutputTokens": 95}
+{"id": "p-0014", "category": "reasoning", "prompt": "List the prime numbers below 20.", "approxInputTokens": 8, "expectedOutputTokens": 22}
+{"id": "p-0015", "category": "summarize", "prompt": "Explain the concept of escrow in two sentences for a non-technical reader.", "approxInputTokens": 16, "expectedOutputTokens": 50}
+{"id": "p-0016", "category": "qa", "prompt": "What is the boiling point of water at sea level in Celsius?", "approxInputTokens": 14, "expectedOutputTokens": 10}
+{"id": "p-0017", "category": "code", "prompt": "Write a regex that matches a valid hexadecimal color code.", "approxInputTokens": 12, "expectedOutputTokens": 40}
+{"id": "p-0018", "category": "creative", "prompt": "Describe a futuristic GPU marketplace in three sentences.", "approxInputTokens": 11, "expectedOutputTokens": 70}
+{"id": "p-0019", "category": "reasoning", "prompt": "If today is Wednesday, what day will it be in 100 days?", "approxInputTokens": 14, "expectedOutputTokens": 35}
+{"id": "p-0020", "category": "qa", "prompt": "Who wrote the theory of general relativity?", "approxInputTokens": 9, "expectedOutputTokens": 8}
+{"id": "p-0021", "category": "long-context", "prompt": "Given a meeting transcript, extract every action item with its owner and due date. (transcript stored in input blob)", "approxInputTokens": 1800, "expectedOutputTokens": 220}
+{"id": "p-0022", "category": "long-context", "prompt": "Summarize the attached 12-page technical RFC into an executive brief. (document stored in input blob)", "approxInputTokens": 6200, "expectedOutputTokens": 380}
+{"id": "p-0023", "category": "code", "prompt": "Refactor this callback-based JS snippet to use async/await. (snippet in input blob)", "approxInputTokens": 240, "expectedOutputTokens": 160}
+{"id": "p-0024", "category": "qa", "prompt": "How many bytes are in a kibibyte?", "approxInputTokens": 9, "expectedOutputTokens": 10}
+{"id": "p-0025", "category": "reasoning", "prompt": "Sort the list [5, 3, 8, 1, 9, 2] and explain which algorithm you used.", "approxInputTokens": 22, "expectedOutputTokens": 65}
