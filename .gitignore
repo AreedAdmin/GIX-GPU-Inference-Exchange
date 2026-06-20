@@ -1,0 +1,34 @@
+# ── Dependencies ───────────────────────────────────────────────
+node_modules/
+
+# ── Build / compiled output ────────────────────────────────────
+# (no trailing/inline comments — git treats them as part of the pattern)
+dist/
+dist-ssr/
+build/
+contracts/build/
+*.tsbuildinfo
+coverage/
+
+# ── Move ephemeral publication metadata (must NOT be committed) ─
+Pub.*.toml
+
+# ── Local runtime / secrets ────────────────────────────────────
+.run/
+.keys/
+*.log
+*.local
+
+# ── Environment files (keep the templates) ─────────────────────
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# ── Editor / OS noise ──────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+
+# ── Claude Code local-only settings (keep shared settings.json) ─
+.claude/settings.local.json
