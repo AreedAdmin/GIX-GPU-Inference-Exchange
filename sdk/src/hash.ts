@@ -19,6 +19,12 @@ export function sha2_256Bytes(input: string): number[] {
   return Array.from(createHash("sha256").update(Buffer.from(input, "utf8")).digest());
 }
 
+/** sha2_256 of RAW bytes → lowercase hex (no 0x). Used to verify a blob's
+ * downloaded bytes against the on-chain output_hash (Walrus path). */
+export function sha2_256HexBytes(bytes: Uint8Array): string {
+  return createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+}
+
 /** Normalize a hex string: strip an optional `0x`, lowercase. */
 export function normalizeHex(hex: string): string {
   const clean = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex;

@@ -10,6 +10,7 @@ export { keypairSigner, fromSuiPrivateKey } from "./signer.js";
 export {
   sha2_256Hex,
   sha2_256Bytes,
+  sha2_256HexBytes,
   hexEquals,
   normalizeHex,
   hexToBytes,
@@ -19,15 +20,37 @@ export { ProviderClient } from "./provider.js";
 export { GixChain, buildCreateJobPlan } from "./chain.js";
 export type {
   CreateJobPlan,
+  CreateJobOutcome,
   MoveCallPlan,
   PlanArg,
   TerminalOutcome,
 } from "./chain.js";
+export {
+  buildFillJobPlan,
+  loadDeepbookTestnetConstants,
+  TESTNET_DEEP_COIN_TYPE,
+} from "./deepbook.js";
+export type {
+  FillJobPlan,
+  FillMoveCall,
+  FillArg,
+  DeepbookTestnetConstants,
+} from "./deepbook.js";
+export {
+  WalrusHelper,
+  verifyBlob,
+  blobIdToU256,
+  u256ToBlobId,
+  DEFAULT_BLOB_EPOCHS,
+} from "./walrus.js";
+export type { UploadInputResult, WalrusHelperOptions } from "./walrus.js";
 export type {
   Deployment,
   MarketDeployment,
   DeploymentAccounts,
   WalletSigner,
+  WalrusUploadSigner,
+  FillConfig,
   GixClientOptions,
   RunTaskArgs,
   RunTaskResult,

@@ -10,6 +10,7 @@
 import { GixChain } from "./chain.js";
 import { hexEquals, sha2_256Bytes, sha2_256Hex } from "./hash.js";
 import { ProviderClient } from "./provider.js";
+import { WalrusHelper } from "./walrus.js";
 import type {
   Balances,
   GixClientOptions,
@@ -76,12 +77,24 @@ export class GixClient {
 
   /**
    * The headline flow: buy on-chain compute for a prompt and return the
-   * verified completion. See class doc for the step ordering.
+   * verified completion. Network-switched:
+   *   - testnet → DeepBook buy (`swap_exact_quote_for_base` → create_job_from_fill,
+   *     one PTB) + Walrus for input/output blobs (Option B, pay-at-match).
+   *   - otherwise (localnet) → the M1 escrow path (POST /inputs → create_job →
+   *     await → GET /result → verify).
    */
   async runTask(args: RunTaskArgs): Promise<RunTaskResult> {
     if (!args.prompt || args.prompt.length === 0) {
       throw new Error("runTask: prompt is required");
     }
+    if ((this.opts.deployment.network ?? "localnet") === "testnet") {
+      return this.runTaskTestnet(args);
+    }
+    return this.runTaskLocalnet(args);
+  }
+
+  /** The M1 localnet path: provider `/inputs` + escrow `create_job` + `/result`. */
+  private async runTaskLocalnet(args: RunTaskArgs): Promise<RunTaskResult> {
     const market = this.resolveMarket(args.market);
     const provider = this.opts.provider ?? this.opts.deployment.accounts?.providers?.[0];
     if (!provider) {
@@ -133,6 +146,107 @@ export class GixClient {
       verified,
       payoutUsdc: terminal.payoutUsdc,
       providerPubkey: result.attestPubkey,
+    };
+  }
+
+  /**
+   * The M2 testnet path (Option B, pay-at-match):
+   *   1. Upload the prompt to Walrus → {blobId(u256), inputHash}.
+   *   2. Buy via DeepBook in ONE PTB: swap_exact_quote_for_base (USDC→Credit)
+   *      → create_job_from_fill (NO escrow; the maker/provider is paid at the
+   *      fill). Returns leftover USDC/DEEP to the consumer.
+   *   3. Await the job's terminal event (the node attests + settles via
+   *      settle_fill / resolve_fill).
+   *   4. Download the output from Walrus by the job's `output_blob_id` and
+   *      verify the bytes against the on-chain output_hash (sha2_256). Falls
+   *      back to the provider `/result` when no output blob was recorded.
+   */
+  private async runTaskTestnet(args: RunTaskArgs): Promise<RunTaskResult> {
+    const market = this.resolveMarket(args.market);
+    const scuQty = BigInt(args.scuQty ?? 1);
+    if (args.maxPriceUsdcPerScu <= 0) throw new Error("runTask: maxPriceUsdcPerScu must be > 0");
+    const usdcIn = BigInt(args.maxPriceUsdcPerScu) * scuQty;
+
+    const fill = this.opts.fill ?? {};
+    const poolId = fill.poolId ?? market.deepbookPoolId ?? undefined;
+    if (!poolId) {
+      throw new Error(
+        "runTask(testnet): no DeepBook pool id (set options.fill.poolId or " +
+          "deployment.markets[].deepbookPoolId — governance must bind it via set_deepbook_pool_id)",
+      );
+    }
+    const providerRecordId =
+      fill.providerRecordId ?? this.opts.deployment.accounts?.providerRecords?.[0];
+    if (!providerRecordId) {
+      throw new Error(
+        "runTask(testnet): no provider ProviderRecord id (set options.fill.providerRecordId or " +
+          "deployment.accounts.providerRecords[0])",
+      );
+    }
+    if (!this.opts.walrusSigner) {
+      throw new Error(
+        "runTask(testnet): a walrusSigner (a @mysten/sui Signer/Keypair) is required to upload the prompt to Walrus",
+      );
+    }
+
+    const timeoutMs = this.opts.settleTimeoutMs ?? DEFAULT_SETTLE_TIMEOUT_MS;
+    const walrus = new WalrusHelper({
+      network: "testnet",
+      suiClient: await this.chain.suiClient(),
+      epochs: fill.walrusEpochs,
+      logger: this.opts.logger,
+    });
+
+    // 1. Upload the prompt to Walrus (commitment + input_hash).
+    const up = await walrus.uploadInput(args.prompt, this.opts.walrusSigner);
+    this.log("walrus input uploaded", { blobId: up.blobId, inputHash: up.inputHash });
+
+    // 2. Buy via DeepBook → create_job_from_fill (one atomic PTB, no escrow).
+    const { jobId, digest } = await this.chain.createJobFromFill({
+      signer: this.opts.signer,
+      market,
+      providerRecordId,
+      poolId,
+      usdcIn,
+      deepIn: fill.deepIn,
+      minBaseOut: fill.minBaseOut ?? scuQty,
+      inputBlobId: up.blobIdU256,
+      inputHashHex: up.inputHash,
+    });
+    this.log("fill job created", { jobId, digest });
+
+    // 3. Await the job's terminal event (node attests + settles).
+    const terminal = await this.chain.awaitSettlement(jobId, { timeoutMs });
+    this.log("job terminal", { state: terminal.state, verdict: terminal.verdict });
+
+    // 4. Download + verify the output from Walrus by the job's output_blob_id.
+    const onChainOutputHash = terminal.outputHashOnChain;
+    let output = "";
+    let verified = false;
+    let outputBlobId: string | undefined;
+    const outputBlobU256 = await this.chain.jobOutputBlobId(jobId);
+    if (outputBlobU256 !== 0n && onChainOutputHash) {
+      const dl = await walrus.downloadAndVerify(outputBlobU256, onChainOutputHash);
+      output = dl.output;
+      verified = dl.verified;
+      outputBlobId = String(outputBlobU256);
+      this.log("walrus output verified", { verified, outputBlobId });
+    } else {
+      // Fallback: the provider may still serve /result (no Walrus output blob).
+      const result = await this.provider.awaitResult(jobId, { timeoutMs });
+      output = result.output;
+      verified = verifyOutput(result.output, onChainOutputHash ?? result.outputHash);
+      this.log("provider result fallback", { verified });
+    }
+
+    return {
+      output,
+      jobId,
+      digest,
+      verified,
+      payoutUsdc: terminal.payoutUsdc,
+      inputBlobId: up.blobId,
+      outputBlobId,
     };
   }
 }

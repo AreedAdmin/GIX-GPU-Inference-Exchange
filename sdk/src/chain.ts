@@ -19,6 +19,10 @@
  * keep the SDK a standalone package; the two will be reconciled to one chain lib.
  */
 
+import {
+  buildFillJobPlan,
+  loadDeepbookTestnetConstants,
+} from "./deepbook.js";
 import { hexToBytes } from "./hash.js";
 import type {
   Deployment,
@@ -26,7 +30,7 @@ import type {
   WalletSigner,
 } from "./types.js";
 
-type SuiClientT = import("@mysten/sui/client").SuiClient;
+type SuiClientT = import("@mysten/sui/jsonRpc").SuiJsonRpcClient;
 type TransactionT = import("@mysten/sui/transactions").Transaction;
 
 /** A declarative description of the create_job PTB — the load-bearing argument
@@ -132,13 +136,20 @@ export class GixChain {
     this.opts.logger?.(m, x);
   }
 
+  /** The connected SuiJsonRpcClient (used to seed the Walrus client). Connects
+   * lazily on first call. */
+  async suiClient(): Promise<SuiClientT> {
+    await this.connect();
+    return this.client;
+  }
+
   private async connect(): Promise<void> {
     if (this.connected) return;
-    const { SuiClient, getFullnodeUrl } = await import("@mysten/sui/client");
+    const { SuiJsonRpcClient, getJsonRpcFullnodeUrl } = await import("@mysten/sui/jsonRpc");
     const { Transaction } = await import("@mysten/sui/transactions");
-    const url =
-      this.opts.rpcUrl ?? getFullnodeUrl((this.deployment.network as Network) ?? "localnet");
-    this.client = new SuiClient({ url });
+    const network = (this.deployment.network as Network) ?? "localnet";
+    const url = this.opts.rpcUrl ?? getJsonRpcFullnodeUrl(network);
+    this.client = new SuiJsonRpcClient({ network, url });
     this.Transaction = Transaction as unknown as new () => TransactionT;
     this.connected = true;
   }
@@ -270,6 +281,171 @@ export class GixChain {
     return coin;
   }
 
+  // ---- M2 testnet buy-path: DeepBook swap → create_job_from_fill ----------
+
+  /**
+   * Resolve the consumer's MOCK_USDC into ONE exact-amount coin to feed the
+   * DeepBook swap (`usdc_in`). Same merge-then-split shape as the escrow coin.
+   */
+  private async splitUsdcInput(tx: TransactionT, consumer: string, amount: bigint) {
+    return this.splitEscrowCoin(tx, consumer, amount);
+  }
+
+  /**
+   * Resolve the consumer's DEEP into ONE exact-amount coin to pay the swap fee,
+   * OR a zero coin when `amount == 0` (input-token-fee path / `pay_with_deep:false`).
+   */
+  private async splitDeepInput(
+    tx: TransactionT,
+    consumer: string,
+    deepCoinType: string,
+    amount: bigint,
+  ) {
+    if (amount === 0n) {
+      // No DEEP fee — mint a typed empty Coin<DEEP> (input-token-fee path).
+      const [deepZero] = tx.moveCall({
+        target: "0x2::coin::zero",
+        typeArguments: [deepCoinType],
+        arguments: [],
+      });
+      return deepZero;
+    }
+    const { data } = await this.client.getCoins({ owner: consumer, coinType: deepCoinType });
+    if (data.length === 0) {
+      throw new Error(
+        `create_job_from_fill: consumer ${consumer} holds no ${deepCoinType} (fund test DEEP first)`,
+      );
+    }
+    const primary = tx.object(data[0]!.coinObjectId);
+    if (data.length > 1) {
+      tx.mergeCoins(primary, data.slice(1).map((c) => tx.object(c.coinObjectId)));
+    }
+    const [coin] = tx.splitCoins(primary, [tx.pure.u64(amount)]);
+    return coin;
+  }
+
+  /**
+   * The M2 testnet buy-path (Option B, pay-at-match). Builds the ONE atomic,
+   * consumer-signed PTB:
+   *
+   *   1) deepbook::pool::swap_exact_quote_for_base<Credit<M>, MOCK_USDC>(
+   *          pool, usdcIn, deepIn, minBaseOut, clock)
+   *        -> (Coin<Credit<M>>, Coin<MOCK_USDC>, Coin<DEEP>)   // PAYS the maker
+   *   2) gix::job::create_job_from_fill<M>(cfg, market, providerRec,
+   *          credits(=swap.0), input_blob_id, input_hash, clock)   // NO escrow
+   *
+   * The USDC + DEEP remainders are transferred back to the consumer. The pool
+   * id comes from `market.deepbookPoolId` (governance-bound on-chain); the
+   * DeepBook package id + DEEP coin type come from `@mysten/deepbook-v3`
+   * testnet constants. See contracts/INTERFACE.md §"M2 — DeepBook fill jobs".
+   */
+  async createJobFromFill(args: {
+    signer: WalletSigner;
+    market: MarketDeployment;
+    /** The single market provider's shared ProviderRecord id (M2 demo). */
+    providerRecordId: string;
+    /** The shared DeepBook Pool<Credit<M>, MOCK_USDC> id. */
+    poolId: string;
+    /** USDC to spend on the swap (base units, 6dp). */
+    usdcIn: bigint;
+    /** DEEP to spend on the swap fee (base units; 0 ⇒ input-token fee). Default 0. */
+    deepIn?: bigint;
+    /** Minimum Credit<M> base out (slippage floor); SCU base units. Default 1. */
+    minBaseOut?: bigint;
+    /** Walrus input-blob commitment (u256; 0 = none). */
+    inputBlobId: bigint;
+    /** sha2_256(prompt) hex — the verification primitive. */
+    inputHashHex: string;
+  }): Promise<CreateJobOutcome> {
+    await this.connect();
+    if ((this.deployment.network ?? "localnet") !== "testnet") {
+      throw new Error(
+        `createJobFromFill: DeepBook is testnet-only (deployment.network=${this.deployment.network})`,
+      );
+    }
+    const consumer = args.signer.toSuiAddress();
+    const deepbook = await loadDeepbookTestnetConstants();
+    const deepIn = args.deepIn ?? 0n;
+    const minBaseOut = args.minBaseOut ?? 1n;
+
+    const plan = buildFillJobPlan({
+      gixPackageId: this.pkg,
+      deepbookPackageId: deepbook.packageId,
+      deepCoinType: deepbook.deepCoinType,
+      usdcType: this.usdcType,
+      configId: this.cfgId,
+      clockId: this.clockId,
+      market: args.market,
+      poolId: args.poolId,
+      providerRecordId: args.providerRecordId,
+      usdcIn: args.usdcIn,
+      deepIn,
+      minBaseOut,
+      inputBlobId: args.inputBlobId,
+      inputHashHex: args.inputHashHex,
+    });
+
+    const tx = new this.Transaction();
+    const usdcCoin = await this.splitUsdcInput(tx, consumer, args.usdcIn);
+    const deepCoin = await this.splitDeepInput(tx, consumer, deepbook.deepCoinType, deepIn);
+
+    // Command 1 — the DeepBook swap. Returns [credit, usdcRemainder, deepRemainder].
+    const swapOut = tx.moveCall({
+      target: plan.swap.target,
+      typeArguments: plan.swap.typeArguments,
+      arguments: plan.swap.arguments.map((a) => {
+        switch (a.kind) {
+          case "object":
+            return tx.object(a.id);
+          case "u64":
+            return tx.pure.u64(a.value);
+          case "u256":
+            return tx.pure.u256(a.value);
+          case "vector<u8>":
+            return tx.pure.vector("u8", a.bytes);
+          case "result":
+            return a.from === "usdcIn" ? usdcCoin : deepCoin;
+        }
+      }),
+    });
+    const creditCoin = swapOut[0];
+    const usdcRemainder = swapOut[1];
+    const deepRemainder = swapOut[2];
+
+    // Command 2 — create_job_from_fill, consuming the swap's Credit<M> output.
+    tx.moveCall({
+      target: plan.createJobFromFill.target,
+      typeArguments: plan.createJobFromFill.typeArguments,
+      arguments: plan.createJobFromFill.arguments.map((a) => {
+        switch (a.kind) {
+          case "object":
+            return tx.object(a.id);
+          case "u64":
+            return tx.pure.u64(a.value);
+          case "u256":
+            return tx.pure.u256(a.value);
+          case "vector<u8>":
+            return tx.pure.vector("u8", a.bytes);
+          case "result":
+            return creditCoin; // the sole result arg is `credits` (= swap.0)
+        }
+      }),
+    });
+
+    // Return the leftover USDC + DEEP to the consumer (all-or-nothing PTB).
+    tx.transferObjects([usdcRemainder, deepRemainder], tx.pure.address(consumer));
+
+    const res = await this.execute(tx, args.signer);
+    const status = res.effects?.status;
+    if (status && status.status !== "success") {
+      throw new Error(`create_job_from_fill tx ${res.digest} failed: ${status.error ?? "unknown"}`);
+    }
+    const jobId = this.firstCreatedOfType(res, `${this.pkg}::job::Job`);
+    if (!jobId) throw new Error(`create_job_from_fill: no Job object created in tx ${res.digest}`);
+    this.log("create_job_from_fill ok", { jobId, digest: res.digest });
+    return { jobId, digest: res.digest };
+  }
+
   /** Sign + execute via the WalletSigner seam (keypair OR injected wallet). */
   private async execute(tx: TransactionT, signer: WalletSigner) {
     // The sender must be set before building (a raw Keypair signer carries no
@@ -362,6 +538,29 @@ export class GixChain {
     await this.connect();
     const bal = await this.client.getBalance({ owner: address });
     return BigInt(bal.totalBalance);
+  }
+
+  /**
+   * Read a fill-job's `output_blob_id` (the Walrus completion-blob commitment,
+   * a u256) directly off the shared Job object. The provider sets it at
+   * attestation; the `AttestationSubmitted` / `Settled` events do NOT carry it,
+   * so the consumer reads the object's field to know which blob to download.
+   * Returns 0n when no blob is recorded (e.g. localnet / escrow paths).
+   */
+  async jobOutputBlobId(jobId: string): Promise<bigint> {
+    await this.connect();
+    const obj = await this.client.getObject({ id: jobId, options: { showContent: true } });
+    const content = obj.data?.content as
+      | { dataType?: string; fields?: Record<string, unknown> }
+      | undefined;
+    if (!content || content.dataType !== "moveObject") return 0n;
+    const raw = content.fields?.output_blob_id;
+    if (raw === undefined || raw === null) return 0n;
+    try {
+      return BigInt(raw as string | number);
+    } catch {
+      return 0n;
+    }
   }
 
   private firstCreatedOfType(

@@ -24,6 +24,10 @@ export interface MarketDeployment {
   scuTokens?: number;
   /** SLA p99 latency budget (ms). */
   slaP99Ms?: number;
+  /** M2: the shared DeepBook `Pool<Credit<M>, MOCK_USDC>` id this market trades
+   * on (governance-bound on-chain via `market::set_deepbook_pool_id`). `null`
+   * until bound. The consumer reads this to discover the canonical pool. */
+  deepbookPoolId?: string | null;
 }
 
 /** Named on-chain accounts (from deployment.json). */
@@ -31,6 +35,10 @@ export interface DeploymentAccounts {
   admin: string;
   providers: string[];
   consumers: string[];
+  /** M2: shared `registry::ProviderRecord` object ids, one per provider. The
+   * testnet fill-path passes `providerRecords[0]` to `create_job_from_fill`
+   * (single-provider demo; multi-provider dispatch deferred). */
+  providerRecords?: string[];
 }
 
 /** The deployment.json document (minimal subset the SDK reads). */
@@ -85,6 +93,20 @@ export interface GixClientOptions {
    * + credits when it creates the job.
    */
   provider?: string;
+  /**
+   * M2 testnet DeepBook buy-path config. When `deployment.network === "testnet"`,
+   * `runTask` buys via a DeepBook swap (`swap_exact_quote_for_base`) composed
+   * with `create_job_from_fill` in one PTB, and uses Walrus for input/output
+   * blobs instead of the provider node `/inputs` + `/result`.
+   */
+  fill?: FillConfig;
+  /**
+   * A real `@mysten/sui` `Signer` (a keypair) used to write blobs to Walrus
+   * (Walrus's writeBlob needs an actual Signer, not the WalletSigner seam).
+   * Required only for the testnet Walrus upload. Typed loosely to avoid a hard
+   * dependency on the SDK's Signer type in this hermetic module.
+   */
+  walrusSigner?: WalrusUploadSigner;
   /** Optional logger; defaults to a no-op. */
   logger?: (msg: string, meta?: Record<string, unknown>) => void;
   /** Override the wall-clock event/settlement poll timeout (ms). Default 120_000. */
@@ -94,6 +116,34 @@ export interface GixClientOptions {
    * global `fetch` (Node 18+).
    */
   fetchImpl?: typeof fetch;
+}
+
+/**
+ * A real `@mysten/sui` Signer for the Walrus upload leg. A Sui `Keypair`
+ * already satisfies this (Walrus's `writeBlob` accepts a `Signer`). Kept as an
+ * opaque type so the SDK does not eagerly import the SDK crypto.
+ */
+export type WalrusUploadSigner = import("@mysten/sui/cryptography").Signer;
+
+/** M2 testnet DeepBook buy-path configuration. */
+export interface FillConfig {
+  /**
+   * The single market provider's shared `ProviderRecord` object id (M2 demo:
+   * one provider serves the market, so assignment is unambiguous). Defaults to
+   * resolution from discovery/deployment if omitted.
+   */
+  providerRecordId?: string;
+  /**
+   * The shared DeepBook `Pool<Credit<M>, MOCK_USDC>` object id. Defaults to
+   * `deployment.markets[].deepbookPoolId`.
+   */
+  poolId?: string;
+  /** DEEP (base units) to spend on the swap fee. 0 ⇒ input-token fee. Default 0. */
+  deepIn?: bigint;
+  /** Minimum Credit<M> base out (slippage floor; SCU base units). Default = scuQty. */
+  minBaseOut?: bigint;
+  /** Walrus storage epochs for the input/output blobs. Default 3. */
+  walrusEpochs?: number;
 }
 
 /** Args for {@link GixClient.runTask}. */
@@ -128,6 +178,10 @@ export interface RunTaskResult {
   payoutUsdc?: number;
   /** The provider's Ed25519 attestation pubkey (hex), as returned by /result. */
   providerPubkey?: string;
+  /** M2 testnet: the Walrus input (prompt) blob id, if the Walrus path was used. */
+  inputBlobId?: string;
+  /** M2 testnet: the Walrus output (completion) blob id, if the output came from Walrus. */
+  outputBlobId?: string;
 }
 
 /** A market as surfaced by {@link GixClient.markets}. */

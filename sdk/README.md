@@ -43,6 +43,69 @@ Verification (`verifyOutput`, §2): `sha2_256(output_utf8)` (Node `crypto`
 SHA-256, byte-identical to Move's `sui::hash::sha2_256`) compared hex-tolerantly
 to the on-chain hash.
 
+## M2 — testnet DeepBook + Walrus path (Option B, pay-at-match)
+
+When `deployment.network === "testnet"`, `runTask` switches rails: it **buys
+capacity on a real DeepBook pool** and uses **Walrus** for the input/output
+blobs (`contracts/INTERFACE.md` §"M2 — DeepBook fill jobs"). The localnet escrow
+path above is unchanged (network-switched).
+
+```ts
+const gix = new GixClient({
+  deployment,                                  // deployment.testnet.json (markets[].deepbookPoolId set)
+  signer: await fromSuiPrivateKey(consumerKey),// signs the buy PTB
+  walrusSigner: ed25519Keypair,                // a real @mysten/sui Signer — Walrus writeBlob needs WAL
+  providerUrl: "http://provider:8080",         // only used as a /result fallback
+  fill: { providerRecordId, poolId },          // default to deployment.* if omitted
+});
+const res = await gix.runTask({ market, prompt, maxPriceUsdcPerScu: 5 });
+// res adds { inputBlobId, outputBlobId }
+```
+
+Testnet flow:
+
+1. **Walrus `uploadInput(prompt)`** → `{ blobId, blobIdU256, inputHash }`
+   (replaces `POST /inputs`). `inputHash = sha2_256(prompt)` stays the
+   verification primitive; the `blob_id` is a storage commitment.
+2. **One atomic, consumer-signed PTB**:
+   - `deepbook::pool::swap_exact_quote_for_base<Credit<M>, MOCK_USDC>(pool,
+     usdcIn, deepIn, minBaseOut, clock)` → `(Coin<Credit<M>>, Coin<MOCK_USDC>,
+     Coin<DEEP>)` — the resting maker (provider) is **paid USDC at the fill**.
+   - `gix::job::create_job_from_fill<M>(cfg, market, providerRec, credits,
+     input_blob_id:u256, input_hash, clock)` — **NO escrow**; consumes the swap's
+     `Credit<M>`. USDC + DEEP remainders are transferred back to the consumer.
+   - DeepBook testnet package id + DEEP coin (`0x36dbef86…::deep::DEEP`) are read
+     from `@mysten/deepbook-v3` testnet constants; the pool id from
+     `deployment.markets[].deepbookPoolId`.
+3. **Await the terminal event** (node attests → `settle_fill` / `resolve_fill`).
+4. **Walrus `downloadOutput(output_blob_id)` + `verify`** — read the job's
+   `output_blob_id` off the Job object, download the bytes, and check
+   `sha2_256(bytes) == on-chain output_hash`. Falls back to provider `/result`
+   when no output blob was recorded.
+
+### Walrus helpers (standalone)
+
+```ts
+import { WalrusHelper, verifyBlob, blobIdToU256, u256ToBlobId } from "@gix/sdk";
+const w = new WalrusHelper({ network: "testnet", suiClient });
+const { blobId, blobIdU256, inputHash } = await w.uploadInput(prompt, signer);
+const { output, verified } = await w.downloadAndVerify(blobIdU256, onChainOutputHash);
+```
+
+### Model-on-Walrus tool
+
+`scripts/upload-model.ts` computes the canonical **`model_hash = sha2_256(file)`**
+for a local GGUF, optionally uploads it to Walrus (`--upload`, guarded — needs
+WAL + is ~4.6 GB), and prints a ready `sui client call …::registry::register_model`
+to bind `model_hash` + `walrus_blob_id` into the on-chain `ModelRecord`.
+
+```bash
+# hash + emit command WITHOUT uploading (default file = the bundled llama3.1:8b GGUF):
+npx tsx scripts/upload-model.ts --deployment ../deployment.testnet.json
+# also upload to Walrus (testnet):
+npx tsx scripts/upload-model.ts --upload --privkey suiprivkey1… --epochs 30
+```
+
 ## Other methods
 
 ```ts
