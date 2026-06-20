@@ -135,9 +135,11 @@ interface JobMeta {
 const Ctx = createContext<GixState | null>(null);
 
 export function GixProvider({ children }: { children: ReactNode }) {
-  // The data source kind is configurable; default mock. createDataSource('ws')
-  // guards the lazy import so a missing ws.ts never breaks the app.
-  const kindEnv = (import.meta.env?.VITE_DATA_SOURCE as "mock" | "ws") ?? "mock";
+  // The data source kind is configurable; default mock. createDataSource('ws') /
+  // createDataSource('deepbook') guard their lazy imports so a missing/uncon-
+  // figured source never breaks the app (each degrades to mock).
+  const kindEnv =
+    (import.meta.env?.VITE_DATA_SOURCE as "mock" | "ws" | "deepbook") ?? "mock";
 
   const [source, setSource] = useState<MarketDataSource>(() => new MockDataSource());
   const sourceRef = useRef(source);
@@ -181,7 +183,9 @@ export function GixProvider({ children }: { children: ReactNode }) {
     let alive = true;
     (async () => {
       const src =
-        kindEnv === "ws" ? await createDataSource("ws") : sourceRef.current;
+        kindEnv === "ws" || kindEnv === "deepbook"
+          ? await createDataSource(kindEnv)
+          : sourceRef.current;
       if (!alive) return;
       if (src !== sourceRef.current) {
         setSource(src);

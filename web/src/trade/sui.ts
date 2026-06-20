@@ -35,7 +35,7 @@ import {
 } from "./result";
 import type { Account, Balances, OrderClient, OrderResult } from "./types";
 
-type SuiClientT = import("@mysten/sui/client").SuiClient;
+type SuiClientT = import("@mysten/sui/jsonRpc").SuiJsonRpcClient;
 type TransactionT = import("@mysten/sui/transactions").Transaction;
 
 /** MOCK_USDC has 6 decimals (mock_usdc::decimals). UI prices are USDC/SCU as decimals;
@@ -91,9 +91,9 @@ export class SuiOrderClient implements OrderClient {
   /** Lazily construct the SDK client + Transaction class (keeps the bundle lean). */
   private async ensureClient(): Promise<void> {
     if (this.connected) return;
-    const { SuiClient } = await import("@mysten/sui/client");
+    const { SuiJsonRpcClient } = await import("@mysten/sui/jsonRpc");
     const { Transaction } = await import("@mysten/sui/transactions");
-    this.client = new SuiClient({ url: this.cfg.rpcUrl });
+    this.client = new SuiJsonRpcClient({ network: this.cfg.network, url: this.cfg.rpcUrl });
     this.Transaction = Transaction as unknown as new () => TransactionT;
     this.connected = true;
   }

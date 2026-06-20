@@ -19,7 +19,7 @@ export interface WalletSigner {
   address: string;
   /** Sign + execute a built Transaction against the given SuiClient. Returns the digest. */
   signAndExecute(
-    client: import("@mysten/sui/client").SuiClient,
+    client: import("@mysten/sui/jsonRpc").SuiJsonRpcClient,
     tx: import("@mysten/sui/transactions").Transaction,
   ): Promise<{ digest: string; objectChanges?: unknown; events?: unknown }>;
 }
@@ -117,7 +117,7 @@ export async function fundSuiFromFaucet(cfg: ChainConfig, address: string): Prom
 export async function mintMockUsdc(
   cfg: ChainConfig,
   signer: WalletSigner,
-  client: import("@mysten/sui/client").SuiClient,
+  client: import("@mysten/sui/jsonRpc").SuiJsonRpcClient,
   amountBaseUnits: number,
 ): Promise<string> {
   const { Transaction } = await import("@mysten/sui/transactions");

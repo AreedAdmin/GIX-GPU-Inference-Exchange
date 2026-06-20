@@ -83,7 +83,7 @@ export interface JobUpdate {
 export type Unsub = () => void;
 
 export interface MarketDataSource {
-  readonly kind: "mock" | "ws";
+  readonly kind: "mock" | "ws" | "deepbook";
   connect(): Promise<void>;
   markets(): Market[];
   onOrderBook(marketId: string, cb: (b: OrderBook) => void): Unsub;
