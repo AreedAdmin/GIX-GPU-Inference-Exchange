@@ -1,0 +1,28 @@
+{
+  "name": "gix-no-gpu-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GPU-less GIX consumer client — run on any Mac (no GPU, no Ollama, no local chain) to buy a real inference from a remote GB10 provider, pay on-chain in MOCK_USDC, and print the verified answer.",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "gix-buy": "./dist/cli.js"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.37.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

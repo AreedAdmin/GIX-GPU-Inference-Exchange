@@ -1,0 +1,21 @@
+{
+  "_comment": "Copy to config.json and fill in. Anything omitted falls back to the bundled ../../deployment.json, then to network defaults. ASK_ID and PROVIDER_URL have NO default — get them from the running provider node.",
+
+  "NETWORK": "localnet",
+  "RPC_URL": "http://127.0.0.1:9000",
+  "SUI_FAUCET_URL": "http://127.0.0.1:9123/gas",
+
+  "PACKAGE_ID": "from deployment.json",
+  "CONFIG_ID": "from deployment.json",
+  "MARKET_ID": "from deployment.json (markets[0].id)",
+  "CREDIT_TYPE": "from deployment.json (markets[0].creditType)",
+  "USDC_TYPE": "from deployment.json (usdcType)",
+  "FAUCET_ID": "from deployment.json (faucetId)",
+  "CLOCK_ID": "0x6",
+
+  "ASK_ID": "0x... the provider's shared Ask<M> object id (AskPosted event)",
+  "PROVIDER_URL": "http://PROVIDER_HOST:8080",
+
+  "SCU_QTY": 1,
+  "EXPLORER_TX_BASE": "https://suiscan.xyz/testnet/tx"
+}

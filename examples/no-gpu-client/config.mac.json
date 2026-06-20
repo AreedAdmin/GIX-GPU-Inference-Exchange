@@ -1,0 +1,16 @@
+{
+  "NETWORK": "localnet",
+  "RPC_URL": "http://192.168.1.81:9000",
+  "SUI_FAUCET_URL": "http://192.168.1.81:9123/gas",
+  "PACKAGE_ID": "0xc3bb6a23f7ca3b52ff86f05265dbd0a53ea0dbe928ef1be984bbfac6af5d0418",
+  "CONFIG_ID": "0x619b5a957bf4dd1557492a1b43be34b64b212b208f9df35aa3454a1a0d2e9718",
+  "MARKET_ID": "0x1083baa639013405f106464cae7628c2a0e02e31ca4149baca279fee1a58e49a",
+  "CREDIT_TYPE": "0xc3bb6a23f7ca3b52ff86f05265dbd0a53ea0dbe928ef1be984bbfac6af5d0418::markets::M_H100_LLAMA8B",
+  "USDC_TYPE": "0xc3bb6a23f7ca3b52ff86f05265dbd0a53ea0dbe928ef1be984bbfac6af5d0418::mock_usdc::MOCK_USDC",
+  "FAUCET_ID": "0x6625e97ec3c0beab19abea2ce0a7bf7d78bb0f3d42e3a3dfbbc50573e611ceab",
+  "CLOCK_ID": "0x6",
+  "ASK_ID": "0xdcec46436ee2f4e5e86756dadf962b35b4c8e47ac6c3b65f8d9ca742bba80124",
+  "PROVIDER_URL": "http://192.168.1.81:8081",
+  "SCU_QTY": 1,
+  "EXPLORER_TX_BASE": "http://192.168.1.81:9000"
+}

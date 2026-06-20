@@ -1,0 +1,131 @@
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadConfig, missingRequired } from "../src/config.js";
+
+/**
+ * The config loader: bundled deployment.json defaults < config.json < env <
+ * CLI overrides. The two integration seams (ASK_ID + PROVIDER_URL) have no
+ * default and must be supplied by the running node.
+ */
+
+let dir: string;
+let deploymentPath: string;
+const PKG = "0xPKGFROMDEPLOY";
+
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "gix-cfg-"));
+  deploymentPath = join(dir, "deployment.json");
+  writeFileSync(
+    deploymentPath,
+    JSON.stringify({
+      network: "localnet",
+      packageId: PKG,
+      configId: "0xCFGFROMDEPLOY",
+      usdcType: `${PKG}::mock_usdc::MOCK_USDC`,
+      faucetId: "0xFAUCETFROMDEPLOY",
+      clockId: "0x6",
+      markets: [
+        { id: "0xMARKETFROMDEPLOY", creditType: `${PKG}::markets::M_H100_LLAMA8B` },
+      ],
+    }),
+  );
+});
+
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+const noEnv = {} as Record<string, string | undefined>;
+
+describe("config loader — deployment.json defaults", () => {
+  it("pulls chain ids from the bundled deployment.json", () => {
+    const cfg = loadConfig({
+      deploymentPath,
+      env: noEnv,
+      overrides: { askId: "0xASK", providerUrl: "http://node:8080" },
+    });
+    expect(cfg.packageId).toBe(PKG);
+    expect(cfg.configId).toBe("0xCFGFROMDEPLOY");
+    expect(cfg.marketId).toBe("0xMARKETFROMDEPLOY");
+    expect(cfg.creditType).toBe(`${PKG}::markets::M_H100_LLAMA8B`);
+    expect(cfg.usdcType).toBe(`${PKG}::mock_usdc::MOCK_USDC`);
+    expect(cfg.faucetId).toBe("0xFAUCETFROMDEPLOY");
+    expect(cfg.clockId).toBe("0x6");
+    expect(cfg.network).toBe("localnet");
+    // localnet RPC + faucet defaults are filled in.
+    expect(cfg.rpcUrl).toBe("http://127.0.0.1:9000");
+    expect(cfg.suiFaucetUrl).toContain("9123");
+    expect(cfg.scuQty).toBe(1);
+  });
+
+  it("requires ASK_ID + PROVIDER_URL (no default → throws by default)", () => {
+    expect(() => loadConfig({ deploymentPath, env: noEnv })).toThrow(/ASK_ID|PROVIDER_URL/);
+  });
+
+  it("requireAll:false defers the node-seam check (wallet/--fund path)", () => {
+    const cfg = loadConfig({ deploymentPath, env: noEnv, requireAll: false });
+    expect(cfg.packageId).toBe(PKG);
+    expect(missingRequired(cfg)).toEqual(["askId", "providerUrl"]);
+  });
+});
+
+describe("config loader — precedence", () => {
+  it("env overrides deployment.json", () => {
+    const cfg = loadConfig({
+      deploymentPath,
+      env: {
+        PACKAGE_ID: "0xENVPKG",
+        ASK_ID: "0xENVASK",
+        PROVIDER_URL: "http://env-node:8080",
+        RPC_URL: "http://env-rpc:9000",
+      },
+    });
+    expect(cfg.packageId).toBe("0xENVPKG");
+    expect(cfg.askId).toBe("0xENVASK");
+    expect(cfg.providerUrl).toBe("http://env-node:8080");
+    expect(cfg.rpcUrl).toBe("http://env-rpc:9000");
+  });
+
+  it("config.json overrides deployment.json but loses to env and CLI", () => {
+    const cfgFile = join(dir, "config.json");
+    writeFileSync(
+      cfgFile,
+      JSON.stringify({
+        PACKAGE_ID: "0xFILEPKG",
+        ASK_ID: "0xFILEASK",
+        PROVIDER_URL: "http://file-node:8080",
+      }),
+    );
+    const cfg = loadConfig({
+      deploymentPath,
+      configPath: cfgFile,
+      env: { PACKAGE_ID: "0xENVPKG" }, // env beats file
+      overrides: { askId: "0xCLIASK" }, // CLI beats all
+    });
+    expect(cfg.packageId).toBe("0xENVPKG"); // env > file
+    expect(cfg.askId).toBe("0xCLIASK"); // CLI > file
+    expect(cfg.providerUrl).toBe("http://file-node:8080"); // file > deploy (no env/CLI)
+  });
+
+  it("testnet network picks testnet RPC + explorer defaults", () => {
+    const cfg = loadConfig({
+      deploymentPath,
+      env: { GIX_NETWORK: "testnet", ASK_ID: "0xASK", PROVIDER_URL: "http://node" },
+    });
+    expect(cfg.network).toBe("testnet");
+    expect(cfg.rpcUrl).toContain("testnet");
+    expect(cfg.explorerTxBase).toContain("testnet");
+    expect(cfg.suiFaucetUrl).toContain("testnet");
+  });
+});
+
+describe("missingRequired", () => {
+  it("lists exactly the unfilled required fields", () => {
+    const cfg = loadConfig({
+      deploymentPath,
+      env: noEnv,
+      overrides: { askId: "0xASK", providerUrl: "http://node" },
+    });
+    expect(missingRequired(cfg)).toEqual([]);
+  });
+});

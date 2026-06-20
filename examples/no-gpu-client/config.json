@@ -1,0 +1,9 @@
+{
+  "NETWORK": "localnet",
+  "RPC_URL": "http://127.0.0.1:9000",
+  "SUI_FAUCET_URL": "http://127.0.0.1:9123/gas",
+  "ASK_ID": "0xdcec46436ee2f4e5e86756dadf962b35b4c8e47ac6c3b65f8d9ca742bba80124",
+  "PROVIDER_URL": "http://127.0.0.1:8081",
+  "SCU_QTY": 1,
+  "EXPLORER_TX_BASE": "http://127.0.0.1:9000"
+}
