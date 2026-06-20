@@ -17,6 +17,8 @@ use sui::coin::Coin;
 // === Error codes (2xx: market) ===
 const EMarketInactive: u64 = 200;
 const EBadParam: u64 = 103;
+/// `deepbook_pool_id` was never bound by governance (M2 fill path needs it set).
+const ENoPool: u64 = 202;
 
 /// SLA + deadline parameters, copied onto each Job at creation. Times in ms.
 public struct SlaParams has store, copy, drop {
@@ -40,6 +42,14 @@ public struct Market<phantom M> has key {
     active: bool,
     /// Mint/burn authority for this market's credit, co-located here.
     supply: Supply<Credit<M>>,
+    /// M2: the shared DeepBook `Pool<Credit<M>, USDC>` this market's capacity trades on.
+    /// `none` until governance binds it via `set_deepbook_pool_id` (additive — the M1
+    /// owned-credits / Ask paths never read it). The on-chain contract does NOT call into
+    /// DeepBook (composition is at the PTB level); this is a governance-published pointer
+    /// so the consumer SDK can discover the canonical pool for the market and so the
+    /// (deferred) PoA/fill-provenance checks have an anchor. Stored as `ID`, not a typed
+    /// reference, so the `gix` package takes no DeepBook Move dependency.
+    deepbook_pool_id: Option<ID>,
 }
 
 const VERSION: u64 = 1;
@@ -83,6 +93,7 @@ public fun create_market<M>(
         fee_tier_bps: 0,
         active: true,
         supply: credit::new_supply<M>(),
+        deepbook_pool_id: option::none(),
     };
     let market_id = object::id(&market);
     events::market_created(market_id, name, model_id, scu_tokens, sla_p99_ms);
@@ -117,6 +128,14 @@ public fun set_sla<M>(
     };
 }
 
+/// M2 governance: bind (or rebind) the shared DeepBook `Pool<Credit<M>, USDC>` id this
+/// market trades on. AdminCap-gated. Additive — the on-chain contract does not call
+/// DeepBook; this is a published pointer for the SDK to discover the canonical pool and a
+/// future anchor for fill-provenance / PoA checks (deferred).
+public fun set_deepbook_pool_id<M>(_: &AdminCap, market: &mut Market<M>, pool_id: ID) {
+    market.deepbook_pool_id = option::some(pool_id);
+}
+
 // === Reads ===
 
 public fun market_id<M>(market: &Market<M>): ID { object::id(market) }
@@ -126,6 +145,18 @@ public fun gpu_class<M>(market: &Market<M>): vector<u8> { market.gpu_class }
 public fun scu_tokens<M>(market: &Market<M>): u64 { market.scu_tokens }
 public fun is_active<M>(market: &Market<M>): bool { market.active }
 public fun fee_tier_bps<M>(market: &Market<M>): u64 { market.fee_tier_bps }
+
+/// The bound DeepBook pool id, if governance has set one. `none` on a fresh market.
+public fun deepbook_pool_id<M>(market: &Market<M>): Option<ID> { market.deepbook_pool_id }
+
+/// Whether a DeepBook pool has been bound. The M2 `create_job_from_fill` requires this so a
+/// fill-job can only be created against a market governance has actually wired to a pool.
+public fun has_deepbook_pool<M>(market: &Market<M>): bool { option::is_some(&market.deepbook_pool_id) }
+
+/// Abort `ENoPool` unless a DeepBook pool is bound (used by the fill-job creation path).
+public fun assert_has_deepbook_pool<M>(market: &Market<M>) {
+    assert!(option::is_some(&market.deepbook_pool_id), ENoPool);
+}
 
 public fun p99_ms<M>(market: &Market<M>): u64 { market.sla.p99_ms }
 public fun ack_deadline_ms<M>(market: &Market<M>): u64 { market.sla.ack_deadline_ms }

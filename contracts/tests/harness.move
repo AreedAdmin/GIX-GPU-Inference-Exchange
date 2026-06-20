@@ -217,6 +217,120 @@ public fun create_job_from_ask(
     job_id
 }
 
+// === M2 DeepBook fill path (Option B — pay-at-match) ===
+
+/// Admin binds a (dummy) DeepBook pool id onto the market so the fill path's
+/// `assert_has_deepbook_pool` is satisfied. Returns the bound id. The on-chain contract never
+/// calls DeepBook; this is a governance-published pointer (real composition is PTB-level).
+public fun bind_deepbook_pool(sc: &mut Scenario): ID {
+    sc.next_tx(admin());
+    let cap = sc.take_from_sender<AdminCap>();
+    let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    // A deterministic stand-in pool id (no DeepBook on the test ledger).
+    let pool_id = object::id_from_address(@0xDEE9);
+    market::set_deepbook_pool_id<M_H100_LLAMA8B>(&cap, &mut market, pool_id);
+    ts::return_shared(market);
+    sc.return_to_sender(cap);
+    pool_id
+}
+
+/// Provider registers (explicit `attest_pubkey`) and stakes + mints `qty` credits, then
+/// TRANSFERS the minted `Coin<Credit<M>>` to `buyer`. This stands in for the DeepBook swap:
+/// in production the consumer swaps USDC→Credit on the pool (paying the provider USDC at the
+/// fill) and the swap RETURNS the `Coin<Credit<M>>` into the same PTB. Here we simulate that
+/// outcome — the buyer ends up holding the credit, the provider already "got paid" off-chain.
+/// Leaves the ProviderCap + ProviderStake owned by the provider; shares the ProviderRecord.
+public fun fill_setup_with_key(
+    sc: &mut Scenario,
+    buyer: address,
+    bond_amt: u64,
+    capacity: u64,
+    qty: u64,
+    attest_pubkey: vector<u8>,
+) {
+    sc.next_tx(provider());
+    let cfg = sc.take_shared<Config>();
+    let cap = registry::register_provider(&cfg, b"http://node", b"H100-80GB", attest_pubkey, sc.ctx());
+    let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let bond = mint_usdc(sc, bond_amt);
+    let mut stake = staking::stake(&cap, &cfg, bond, capacity, sc.ctx());
+    let credits = staking::mint_credits<M_H100_LLAMA8B>(&cap, &mut stake, &cfg, &mut market, qty, sc.ctx());
+    ts::return_shared(cfg);
+    ts::return_shared(market);
+    transfer::public_transfer(cap, provider());
+    transfer::public_transfer(stake, provider());
+    // Hand the swap-output credits to the buyer (simulated DeepBook fill).
+    transfer::public_transfer(credits, buyer);
+}
+
+/// `buyer` creates a fill-job from the credits it received from the (simulated) DeepBook swap,
+/// WITHOUT any escrow and WITHOUT touching the provider's stake/cap — it only references the
+/// shared ProviderRecord. Returns the new Job id. Binds `in_blob`/`in_hash`.
+public fun create_job_from_fill(
+    sc: &mut Scenario,
+    buyer: address,
+    in_blob: u256,
+    in_hash: vector<u8>,
+): ID {
+    sc.next_tx(buyer);
+    let cfg = sc.take_shared<Config>();
+    let market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let provider_rec = sc.take_shared<ProviderRecord>();
+    let clk = sc.take_shared<Clock>();
+    let credits = ts::take_from_address<Coin<Credit<M_H100_LLAMA8B>>>(sc, buyer);
+
+    let job_id = job::create_job_from_fill<M_H100_LLAMA8B>(
+        &cfg,
+        &market,
+        &provider_rec,
+        credits,
+        in_blob,
+        in_hash,
+        &clk,
+        sc.ctx(),
+    );
+
+    ts::return_shared(cfg);
+    ts::return_shared(market);
+    ts::return_shared(provider_rec);
+    ts::return_shared(clk);
+    job_id
+}
+
+/// Settle a Verified fill-job (no escrow, no payout — provider already paid at the match).
+public fun settle_fill(sc: &mut Scenario) {
+    sc.next_tx(consumer());
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let cfg = sc.take_shared<Config>();
+    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+
+    settlement::settle_fill<M_H100_LLAMA8B>(&mut job, &mut market, &cfg, &mut stake, sc.ctx());
+
+    ts::return_shared(job);
+    ts::return_shared(market);
+    ts::return_shared(cfg);
+    ts::return_to_address(provider(), stake);
+}
+
+/// Resolve an attested-but-failing fill-job (refund the consumer in USDC from the slash).
+public fun resolve_fill(sc: &mut Scenario) {
+    sc.next_tx(consumer());
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let cfg = sc.take_shared<Config>();
+    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+    let mut treasury = sc.take_shared<Treasury>();
+
+    settlement::resolve_fill<M_H100_LLAMA8B>(&mut job, &mut market, &cfg, &mut stake, &mut treasury, sc.ctx());
+
+    ts::return_shared(job);
+    ts::return_shared(market);
+    ts::return_shared(cfg);
+    ts::return_to_address(provider(), stake);
+    ts::return_shared(treasury);
+}
+
 /// Consumer creates a Job from the provided credits + escrow at the current clock time.
 /// Returns the new Job's id. Runs in a consumer tx. Uses the default `input_hash()`.
 public fun create_job(
@@ -346,6 +460,8 @@ public fun submit_signed(
         t_start,
         t_end,
         signature,
+        0, // M2 output_blob_id (unused by these tests)
+        0, // M2 quote_blob_id (unused by these tests)
         &clk,
         sc.ctx(),
     );

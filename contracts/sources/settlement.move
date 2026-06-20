@@ -1,22 +1,35 @@
 /// Settlement: the only module that disposes of a Job's escrow + drives slashing payouts.
 ///
-/// Three terminal outcomes, each draining the escrow exactly once (I8) and flipping the
-/// Job to a terminal state in the same call:
-///   - `settle`             : Verified job → provider paid (− fee), fee → treasury,
+/// Terminal outcomes, each draining the escrow at most once (I8) and flipping the Job to a
+/// terminal state in the same call:
+///   - `settle`             : Verified ESCROW job → provider paid (− fee), fee → treasury,
 ///                            reserved credits burned, capacity consumed → Settled.
-///   - `resolve_attested`   : Attested job with a failing verdict (invalid / SLA breach)
-///                            → full refund + slash → Refunded(+Slashed).
+///   - `resolve_attested`   : Attested ESCROW job with a failing verdict (invalid / SLA
+///                            breach) → full refund + slash → Refunded(+Slashed).
 ///   - `expire_and_resolve` : a deadline lapsed with no valid attestation → full refund;
 ///                            slash if the miss was the provider's fault → Refunded(+Slashed).
 ///
-/// D1 split: the consumer's full escrow is refunded first and unconditionally; the *slash
-/// penalty* then compensates the consumer up to 100% of job value, remainder to treasury,
-/// burn = 0 (USDC isn't meaningfully burnable in v1).
+/// M2 — DeepBook fill jobs (Option B, pay-at-match). A fill-job carries NO USDC escrow: the
+/// provider was already paid USDC at the DeepBook match (off-chain to GIX). Its terminal
+/// paths therefore differ in WHO holds the money in the interim, not in the verdict engine:
+///   - `settle_fill`        : Verified FILL job → NO escrow release / NO payout (provider
+///                            already paid); just burn the reserved credit + consume_minted
+///                            → Settled.
+///   - `resolve_fill`       : Attested FILL job with a failing verdict → slash the provider
+///                            and REFUND THE CONSUMER IN USDC FROM THE SLASH (there is no
+///                            escrow to refund) → Refunded(+Slashed).
+///   - `expire_and_resolve` : also handles fill-jobs (deadline miss) — the shared
+///                            `refund_and_slash` drains a zero escrow and compensates the
+///                            consumer purely from the slash.
+///
+/// D1 split (escrow jobs): the consumer's full escrow is refunded first and unconditionally;
+/// the *slash penalty* then compensates the consumer up to 100% of job value, remainder to
+/// treasury, burn = 0. For FILL jobs there is no escrow leg, so the consumer's protection is
+/// entirely the slash→refund (the `k`-ratio guarantees the value-at-risk is covered).
 module gix::settlement;
 
 use gix::config::Config;
 use gix::credit::Credit;
-use gix::escrow;
 use gix::events;
 use gix::job::{Self, Job};
 use gix::market::Market;
@@ -33,6 +46,8 @@ const EBadState: u64 = 400;
 const ENotVerified: u64 = 402;
 const EDeadlineNotPassed: u64 = 403;
 const EWrongConsumer: u64 = 404;
+/// Called an escrow path on a fill-job, or a fill path on an escrow job.
+const EWrongJobKind: u64 = 409;
 
 /// Protocol fee sink + treasury-funded backstop pool (B3 nominal). Shared so any
 /// settlement can deposit into it; only the AdminCap can withdraw.
@@ -58,8 +73,9 @@ fun init(ctx: &mut TxContext) {
 
 // === Happy path ===
 
-/// Settle a Verified job: pay provider `price − fee`, fee → treasury, burn the reserved
-/// credits (capacity consumed), release the reservation. Callable by anyone.
+/// Settle a Verified ESCROW job: pay provider `price − fee`, fee → treasury, burn the
+/// reserved credits (capacity consumed), release the reservation. Callable by anyone.
+/// Aborts `EWrongJobKind` on a fill-job (use `settle_fill`).
 public fun settle<M>(
     job: &mut Job<M>,
     market: &mut Market<M>,
@@ -70,6 +86,7 @@ public fun settle<M>(
 ) {
     cfg.assert_version();
     assert!(!job.is_terminal(), EBadState);
+    assert!(!job.is_fill(), EWrongJobKind);
     assert!(job.state() == job::s_verified(), ENotVerified);
 
     let price = job.price_usdc();
@@ -77,7 +94,7 @@ public fun settle<M>(
     let provider = job.provider();
 
     // Drain escrow, split fee, pay provider.
-    let mut funds = escrow::withdraw_all(job.escrow_mut());
+    let mut funds = job.take_escrow_funds();
     let fee_bps = market.effective_fee_bps(cfg);
     let fee = ((price as u128) * (fee_bps as u128) / (gix::config::bps_denom() as u128)) as u64;
     let fee_bal = funds.split(fee);
@@ -96,10 +113,49 @@ public fun settle<M>(
     events::settled(object::id(job), provider, payout, fee, job.output_hash());
 }
 
+// === Happy path: DeepBook fill-job (Option B — provider already paid at the match) ===
+
+/// Settle a Verified FILL job. There is NO escrow and the provider was ALREADY PAID USDC at
+/// the DeepBook match, so settlement pays NOTHING EXTRA on the happy path — it simply burns
+/// the reserved credit (capacity consumed) and retires the minted SCU, then marks Settled.
+/// Emits `Settled` with `payout = 0, fee = 0` (the on-chain settlement moves no USDC).
+/// Aborts `EWrongJobKind` on an escrow job (use `settle`). Callable by anyone.
+public fun settle_fill<M>(
+    job: &mut Job<M>,
+    market: &mut Market<M>,
+    cfg: &Config,
+    stake: &mut ProviderStake,
+    ctx: &mut TxContext,
+) {
+    cfg.assert_version();
+    assert!(!job.is_terminal(), EBadState);
+    assert!(job.is_fill(), EWrongJobKind);
+    assert!(job.state() == job::s_verified(), ENotVerified);
+
+    let qty = job.scu_qty();
+    let provider = job.provider();
+
+    // No escrow to drain, no payout, no fee — the provider was paid at the fill.
+    // Burn the reserved credit (capacity consumed); retire the minted SCU. `reserved_scu` was
+    // NOT bumped for a fill-job (consumer never reached the stake), so `release` is a tolerant
+    // no-op — identical to the Ask path's capacity accounting.
+    let credits: Balance<Credit<M>> = job.take_reserved_credits();
+    market.burn_credit(credits);
+    staking::consume_minted(stake, qty);
+    staking::release(stake, qty);
+
+    job.set_state_settled();
+    events::settled(object::id(job), provider, 0, 0, job.output_hash());
+    // `ctx` is retained for signature symmetry with `settle` and a future fee/payout leg; no
+    // coin/object is created here (the on-chain settlement moves no USDC for a fill-job).
+    let _ = ctx;
+}
+
 // === Fault path: a submitted attestation that failed verification ===
 
-/// Resolve a job that was attested but whose verdict is non-VALID (invalid binding or SLA
-/// breach): refund the consumer in full and slash the provider per the fault class.
+/// Resolve an ESCROW job that was attested but whose verdict is non-VALID (invalid binding or
+/// SLA breach): refund the consumer in full and slash the provider per the fault class.
+/// Aborts `EWrongJobKind` on a fill-job (use `resolve_fill`).
 public fun resolve_attested<M>(
     job: &mut Job<M>,
     market: &mut Market<M>,
@@ -110,6 +166,38 @@ public fun resolve_attested<M>(
 ) {
     cfg.assert_version();
     assert!(!job.is_terminal(), EBadState);
+    assert!(!job.is_fill(), EWrongJobKind);
+    assert!(job.state() == job::s_attested(), EBadState);
+    assert!(job.has_attestation(), EBadState);
+
+    let verdict = job.attestation_verdict();
+    let (fault, reason) = if (verdict == job::verdict_sla_breach()) {
+        (slashing::fault_sla(), job::reason_sla_breach())
+    } else {
+        (slashing::fault_invalid(), job::reason_invalid_attestation())
+    };
+    refund_and_slash(job, market, cfg, stake, treasury, fault, reason, ctx);
+}
+
+// === Fault path: a fill-job whose attestation failed verification (refund-from-slash) ===
+
+/// Resolve a FILL job that was attested but whose verdict is non-VALID. There is no escrow to
+/// refund (Option B — provider paid at the match), so the consumer is compensated ENTIRELY
+/// from the provider's slash: the bond is slashed per the fault class and the penalty
+/// compensates the consumer up to the job's value-at-risk, remainder to treasury. Shares the
+/// `refund_and_slash` machinery (which drains a zero escrow for a fill-job). Aborts
+/// `EWrongJobKind` on an escrow job (use `resolve_attested`).
+public fun resolve_fill<M>(
+    job: &mut Job<M>,
+    market: &mut Market<M>,
+    cfg: &Config,
+    stake: &mut ProviderStake,
+    treasury: &mut Treasury,
+    ctx: &mut TxContext,
+) {
+    cfg.assert_version();
+    assert!(!job.is_terminal(), EBadState);
+    assert!(job.is_fill(), EWrongJobKind);
     assert!(job.state() == job::s_attested(), EBadState);
     assert!(job.has_attestation(), EBadState);
 
@@ -186,9 +274,16 @@ public fun cancel<M>(
     let consumer = job.consumer();
     let provider = job.provider();
 
-    let funds = escrow::withdraw_all(job.escrow_mut());
+    // For a FILL job there is no escrow to refund (the provider was paid at the match and
+    // keeps it — a pre-ack consumer cancel is a no-fault walk-away, so no slash); the credit
+    // simply returns to the provider. For an escrow job this refunds the full escrow.
+    let funds = job.take_escrow_funds();
     let amount = balance::value(&funds);
-    transfer::public_transfer(coin::from_balance(funds, ctx), consumer);
+    if (amount > 0) {
+        transfer::public_transfer(coin::from_balance(funds, ctx), consumer);
+    } else {
+        balance::destroy_zero(funds);
+    };
 
     // Return reserved credits to the provider to re-sell (un-reserved, not burned).
     return_credits_to_provider<M>(job, provider, ctx);
@@ -217,10 +312,16 @@ fun refund_and_slash<M>(
     let consumer = job.consumer();
     let provider = job.provider();
 
-    // 1. Refund the full escrow to the consumer FIRST and unconditionally.
-    let funds = escrow::withdraw_all(job.escrow_mut());
+    // 1. Refund the escrow to the consumer FIRST and unconditionally. For a FILL job there is
+    //    no escrow (Option B), so this is a zero refund and the consumer's whole compensation
+    //    comes from the slash in step 2.
+    let funds = job.take_escrow_funds();
     let refund_amount = balance::value(&funds);
-    transfer::public_transfer(coin::from_balance(funds, ctx), consumer);
+    if (refund_amount > 0) {
+        transfer::public_transfer(coin::from_balance(funds, ctx), consumer);
+    } else {
+        balance::destroy_zero(funds);
+    };
 
     // 2. Slash the provider's bond and distribute (D1: consumer comp up to job value,
     //    remainder to treasury, burn = 0).

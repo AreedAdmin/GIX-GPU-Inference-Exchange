@@ -9,9 +9,11 @@ This file records the **as-built** public entrypoint signatures and the **deviat
 - Sui CLI built/tested against: **1.73.1**. Move edition **2024**. (`sui move build/test`
   require `--build-env testnet` or `--build-env mainnet`; localnet deps are resolved at
   publish time via `test-publish`.)
-- `sui move build`: green (no warnings). `sui move test`: **26/26 passing** (15 M1 +
-  5 soft-attestation + 6 shared-Ask order-book). See §"Soft attestation" for the signed
-  path and §"Shared-Ask order book (two-account flow)" for the new buyer≠seller path.
+- `sui move build`: green (no warnings). `sui move test`: **32/32 passing** (15 M1 +
+  5 soft-attestation + 6 shared-Ask order-book + 6 M2 DeepBook-fill). See §"Soft
+  attestation" for the signed path, §"Shared-Ask order book (two-account flow)" for the
+  buyer≠seller path, and §"M2 — DeepBook fill jobs (Option B, pay-at-match)" for the new
+  no-escrow / refund-from-slash fill path + Walrus blob-id fields.
 - Dev quote/escrow/bond coin: **`gix::mock_usdc::MOCK_USDC`** (6 decimals).
 - Per-market credit witness for M1: **`gix::markets::M_H100_LLAMA8B`** → coin type
   `gix::credit::Credit<gix::markets::M_H100_LLAMA8B>`.
@@ -70,6 +72,15 @@ public fun create_market<M>(_: &AdminCap, cfg: &Config, name: vector<u8>, gpu_cl
 public fun set_active<M>(_: &AdminCap, market: &mut Market<M>, active: bool)
 public fun set_fee_tier_bps<M>(_: &AdminCap, market: &mut Market<M>, bps: u64)
 public fun set_sla<M>(_: &AdminCap, market: &mut Market<M>, p99_ms: u64, ack_ms: u64, exec_ms: u64, attest_ms: u64)
+// NEW (M2): bind/rebind the shared DeepBook Pool<Credit<M>,USDC> id this market trades on.
+// AdminCap-gated governance setter. ADDITIVE field `deepbook_pool_id: Option<ID>` on
+// Market<M> (none on a fresh market). The on-chain contract NEVER calls DeepBook — this is a
+// published pointer the consumer SDK reads to discover the canonical pool, and the anchor for
+// the (DEFERRED) fill-provenance / PoA checks. Stored as `ID`, so the package takes NO
+// DeepBook Move dependency. `create_job_from_fill` aborts `ENoPool` (202) if it is unset.
+public fun set_deepbook_pool_id<M>(_: &AdminCap, market: &mut Market<M>, pool_id: ID)
+public fun deepbook_pool_id<M>(market: &Market<M>): Option<ID>
+public fun has_deepbook_pool<M>(market: &Market<M>): bool
 ```
 
 ### Staking (USDC bond) — `gix::staking`
@@ -123,6 +134,31 @@ public fun create_job<M>(cfg: &Config, market: &Market<M>, stake: &mut ProviderS
 // NO ProviderStake / ProviderCap in scope — the consumer touches only the shared Ask.
 public fun create_job_from_ask<M>(cfg: &Config, market: &Market<M>, ask: &mut Ask<M>, qty_scu: u64, escrow_in: Coin<MOCK_USDC>, input_hash: vector<u8>, clk: &Clock, ctx: &mut TxContext): ID   // shares Job<M>
 public fun ack<M>(job: &mut Job<M>, clk: &Clock, ctx: &TxContext)
+
+// NEW (M2 — DeepBook fill, Option B / pay-at-match). CONSUMER-SIGNED. In the SAME PTB the
+// consumer swaps USDC→Coin<Credit<M>> on the market's DeepBook pool (which PAYS THE PROVIDER
+// USDC AT THE FILL, off-chain to GIX), then feeds the returned credits in here. There is NO
+// USDC escrow object (the provider was already paid); the Job carries the reserved credit
+// only. `price_usdc` is recorded as `scu_qty` (the per-job value-at-risk that caps the
+// consumer's refund-from-slash). Reserve-then-burn intact (credits burned at `settle_fill`);
+// does NOT bump reserved_scu (consumer can't reach the stake — same as the Ask path). Records
+// the Walrus `input_blob_id` COMMITMENT alongside `input_hash` (the sha2_256 verification
+// primitive). Requires a bound DeepBook pool (aborts market::ENoPool=202 otherwise); asserts
+// scu_qty>0 (EZeroQty=405), market active, not paused. Advances to Dispatched; emits
+// JobCreated + Dispatched. Returns the new Job's ID.
+//
+// Provider assignment (M2 demo): a SINGLE provider serves the market (the GB10), so the
+// caller passes that provider's shared ProviderRecord and the Job binds to its operator.
+// MULTI-PROVIDER trustless dispatch (resolving the filled maker_balance_manager_id→owner()
+// and proving credit provenance) is DEFERRED — see §"DEFERRED (M2)".
+public fun create_job_from_fill<M>(cfg: &Config, market: &Market<M>, provider_rec: &ProviderRecord, credits: Coin<Credit<M>>, input_blob_id: u256, input_hash: vector<u8>, clk: &Clock, ctx: &mut TxContext): ID   // shares Job<M>
+
+// NEW (M2) Job reads (Walrus blob-id commitments + fill flag; all ADDITIVE):
+public fun job_is_fill<M>(job: &Job<M>): bool          // true ⇒ no escrow, provider paid at fill
+public fun job_input_blob_id<M>(job: &Job<M>): u256    // Walrus input (prompt) blob, 0 = none
+public fun job_output_blob_id<M>(job: &Job<M>): u256   // Walrus output (completion) blob, 0 = none
+public fun job_quote_blob_id<M>(job: &Job<M>): u256    // Walrus attestation-quote blob, 0 = none
+// job_escrow_value<M> now returns 0 for a fill-job (no escrow) instead of aborting.
 ```
 
 ### Attestation — `gix::attestation`
@@ -137,12 +173,20 @@ public fun submit_mock_attestation<M>(
 // SIGNED path (off-localnet-safe soft attestation). Verifies a native Ed25519 signature
 // over the canonical message (see §"Soft attestation") against provider_rec's registered
 // pubkey, then runs the SAME verdict engine + records the verdict. NO is_localnet gate.
+// CHANGED (M2): gained `output_blob_id: u256` + `quote_blob_id: u256` (Walrus COMMITMENTS for
+// the completion blob and the attestation-quote blob), inserted after `signature` and before
+// `clk`. These are NOT part of the signed canonical message (the §"Soft attestation" byte
+// layout is UNCHANGED — the signature binds the sha2_256 output_hash, not the blob id), so
+// existing node signatures stay valid. Pass 0 for either when no Walrus blob applies. They are
+// recorded on the Job (output_blob_id) and on the AttestationRecord (quote_blob_id) alongside
+// the sha2_256 hashes, which remain the verification primitive.
 public fun submit_signed_attestation<M>(
     job: &mut Job<M>, cfg: &Config, market: &Market<M>, model: &ModelRecord, allow: &MeasurementAllowlist,
     provider_rec: &ProviderRecord,
     runtime_measurement: vector<u8>, input_hash: vector<u8>, output_hash: vector<u8>,
     output_token_count: u64, t_start: u64, t_end: u64,
-    signature: vector<u8> /*ed25519, 64B*/, clk: &Clock, ctx: &TxContext)
+    signature: vector<u8> /*ed25519, 64B*/, output_blob_id: u256, quote_blob_id: u256,
+    clk: &Clock, ctx: &TxContext)
 
 // Canonical-message + hash helpers (also callable off-chain by tooling/tests):
 public fun build_attestation_message(job_id: ID, runtime_measurement: &vector<u8>, input_hash: &vector<u8>, output_hash: &vector<u8>, output_token_count: u64, t_start: u64, t_end: u64): vector<u8>
@@ -152,11 +196,27 @@ public fun verdict<M>(job: &Job<M>): u8
 
 ### Settlement (+ Treasury) — `gix::settlement`
 ```move
+// ESCROW jobs (create_job / create_job_from_ask). `settle`/`resolve_attested` now abort
+// EWrongJobKind=409 on a fill-job (route fill-jobs to settle_fill/resolve_fill).
 public fun settle<M>(job: &mut Job<M>, market: &mut Market<M>, cfg: &Config, stake: &mut ProviderStake, treasury: &mut Treasury, ctx: &mut TxContext)
 public fun resolve_attested<M>(job: &mut Job<M>, market: &mut Market<M>, cfg: &Config, stake: &mut ProviderStake, treasury: &mut Treasury, ctx: &mut TxContext)
+// expire_and_resolve + cancel handle BOTH kinds: for a fill-job the escrow leg is a zero
+// drain, so the consumer's compensation comes purely from the slash (refund-from-slash).
 public fun expire_and_resolve<M>(job: &mut Job<M>, market: &mut Market<M>, cfg: &Config, stake: &mut ProviderStake, treasury: &mut Treasury, clk: &Clock, ctx: &mut TxContext)
 public fun cancel<M>(job: &mut Job<M>, cfg: &Config, stake: &mut ProviderStake, ctx: &mut TxContext)
 public fun withdraw_treasury(_: &AdminCap, treasury: &mut Treasury, amount: u64, recipient: address, ctx: &mut TxContext)
+
+// NEW (M2) — FILL jobs (create_job_from_fill, Option B / pay-at-match). NO escrow.
+// `settle_fill`: Verified fill-job → pays NOTHING extra, moves NO USDC (provider already paid
+// at the match); burns the reserved credit + consume_minted → Settled (emits Settled with
+// payout=0, fee=0). Note: NO `treasury` arg (no fee leg). Aborts EWrongJobKind=409 on an
+// escrow job, ENotVerified=402 unless Verified.
+public fun settle_fill<M>(job: &mut Job<M>, market: &mut Market<M>, cfg: &Config, stake: &mut ProviderStake, ctx: &mut TxContext)
+// `resolve_fill`: attested-but-failing fill-job → there is no escrow to refund, so the
+// consumer is compensated ENTIRELY from the provider's slash (refund-from-slash, capped at
+// price_usdc = scu_qty value-at-risk; remainder → treasury). Aborts EWrongJobKind=409 on an
+// escrow job. Same verdict→fault routing as resolve_attested.
+public fun resolve_fill<M>(job: &mut Job<M>, market: &mut Market<M>, cfg: &Config, stake: &mut ProviderStake, treasury: &mut Treasury, ctx: &mut TxContext)
 ```
 
 ### Governance (bootstrap convenience) — `gix::governance`
@@ -356,6 +416,99 @@ public struct AskPosted has copy, drop {
   DeepBook maker order in `sui-move-contracts.md` §5.3 (`create_job_from_fill`); when
   DeepBook lands, `create_job_from_ask` is replaced by `create_job_from_fill` and the `Ask`
   object retires. No maker bond is required at MVP (open-question E3).
+
+---
+
+## M2 — DeepBook fill jobs (Option B, pay-at-match) — authoritative
+
+This is the M2 settlement-rail change: capacity trades on a real **DeepBook**
+`Pool<Credit<M>, USDC>`, and the consumer creates a job from the swap output via
+**`job::create_job_from_fill`**. It is **ADDITIVE** — `create_job`, `create_job_from_ask`,
+and the `ask` module are unchanged and the live localnet demo still uses them. The `gix`
+package takes **NO DeepBook or Walrus Move dependency**: composition is at the **PTB level**
+(the function just receives a `Coin<Credit<M>>` and stores `u256` blob ids).
+
+### The model (Option B — confirmed, see `docs/m2-phase0-design.md`)
+
+- The provider mints `Credit<M>` and posts a resting **ask on DeepBook** (sells credits for
+  USDC). The consumer **swaps USDC→`Credit<M>` atomically in a PTB**; that swap **pays the
+  provider (the resting maker) USDC AT THE FILL** — off-chain to GIX. The consumer then feeds
+  the returned `Coin<Credit<M>>` into `create_job_from_fill` in the **same PTB**.
+- Therefore a fill-job has **NO USDC escrow**. The provider was already paid; the Job carries
+  only the **reserved credit**. `job.is_fill == true`, `job.escrow == none`.
+- **Consumer protection = refund-from-slash.** On any fault (invalid / missing / SLA) the
+  provider's bond is **slashed** and the consumer is **refunded in USDC from the slash**
+  (`resolve_fill` / `expire_and_resolve`), capped at the per-job value-at-risk
+  (`price_usdc = scu_qty`); the `k`-ratio guarantees the cap is covered. There is no escrow
+  leg to refund — this is the deliberate Option-B trade-off (who holds the money in the
+  interim shifts from held-escrow to stake/slash). Same cryptographic verification as M1.
+- **On success** (`settle_fill`) the on-chain settlement **moves no USDC** and pays nothing
+  extra (provider already paid); it just **burns the reserved credit** + `consume_minted`
+  and marks **Settled** (emits `Settled` with `payout=0, fee=0`). Protocol-fee capture for
+  fill-jobs (a fee skimmed off the DeepBook proceeds) is **not** wired in M2 — the fee in
+  Option B would have to be taken on the swap side; deferred.
+
+### The exact PTB the TS side must build (`deepbook swap → create_job_from_fill`)
+
+One signed PTB, consumer-signed, two logical commands:
+
+```
+// 1) DeepBook v3 swap: USDC → Credit<M> on the market's bound pool. Returns LOOSE coins
+//    usable by the next command (confirmed in m2-phase0-design.md). The provider (resting
+//    maker) is PAID USDC here.
+let (creditCoin, usdcRemainder, deepRemainder) =
+    deepbook::pool::swap_exact_quote_for_base<Credit<M>, USDC>(
+        pool,            // = market.deepbook_pool_id  (bound via market::set_deepbook_pool_id)
+        usdcIn,          // consumer's USDC
+        deepIn /*or input-token fee*/, minBaseOut, clock, ctx);
+
+// 2) GIX fill-job, SAME PTB. consumer-signed; NO escrow coin. Feeds the swap-output credits.
+let jobId = gix::job::create_job_from_fill<M>(
+        cfg, market, providerRec,   // providerRec = the single market provider's shared record
+        creditCoin,                 // ← the Coin<Credit<M>> the swap returned
+        inputBlobId /*u256, Walrus commitment*/, inputHash /*sha2_256(prompt)*/,
+        clock, ctx);
+
+// return / transfer usdcRemainder + deepRemainder back to the consumer.
+```
+
+Type-arg `M` = `creditType` from `deployment.json`. The pool id is read from
+`market::deepbook_pool_id<M>` (governance binds it once via `set_deepbook_pool_id`). Testnet
+DeepBook package ids come from `@mysten/deepbook-v3/src/utils/constants.ts` (NOT in the
+bundled docs). DeepBook + Walrus are **testnet-only**, so M2 live integration runs on testnet.
+
+### Walrus blob-id fields (ADDITIVE — commitments, not content hashes)
+
+GIX's own **`sha2_256`** digests (`input_hash` / `output_hash`) remain the **verification
+primitive**. The Walrus `blob_id` is a **storage commitment**, recorded ALONGSIDE the hashes:
+
+- `Job<M>.input_blob_id: u256` — set at `create_job_from_fill` (prompt blob).
+- `Job<M>.output_blob_id: u256` — set at attestation (completion blob).
+- `AttestationRecord.quote_blob_id: u256` — set at attestation (signed-quote blob).
+- `ModelRecord.walrus_blob_id` (pre-existing) carries the model artifact blob (the 4.6 GB
+  model fits as a single regular blob). Provider fetches the model → recomputes GIX
+  `model_hash` → refuses on mismatch.
+
+`0` means "no blob recorded" (e.g. the localnet mock path, or the M1 escrow paths). Reads:
+`job_input_blob_id` / `job_output_blob_id` / `job_quote_blob_id`. The signed-attestation
+canonical message is **UNCHANGED** (the §"Soft attestation" byte layout does not include blob
+ids — they are not content hashes), so existing node signatures stay valid.
+
+### DEFERRED (M2) — clearly flagged
+
+- **Multi-provider trustless dispatch.** For the M2 demo a **single provider** (the GB10)
+  serves the market, so provider assignment is unambiguous: the caller passes that provider's
+  shared `ProviderRecord` and the Job binds to its operator. There is **no on-chain proof**
+  that this record was the DeepBook maker the swap actually filled against. Resolving the
+  filled `maker_balance_manager_id → owner()` and proving credit provenance (so N makers in
+  one taker order ⇒ N correctly-assigned jobs) is **deferred**.
+- **Walrus PoA / `BlobCertified` dispatch gate.** A future revision will gate dispatch on the
+  input blob being **certified** on Walrus (`Blob.certified_epoch` set) so the provider can
+  always fetch the prompt. That needs the on-chain `walrus::blob::Blob` (a Walrus Move dep) at
+  `create_job_from_fill`; M2 leaves a clearly-commented **no-op stub** in `job.move` and
+  records only the `input_blob_id` commitment.
+- **Fill-job protocol fee.** In Option B the GIX fee can't be skimmed from a (non-existent)
+  escrow; it would be taken on the swap side. `settle_fill` charges no fee (deferred).
 
 ---
 

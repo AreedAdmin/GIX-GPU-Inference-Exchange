@@ -18,6 +18,7 @@ use gix::credit::{Self, Credit};
 use gix::escrow::{Self, Escrow};
 use gix::events;
 use gix::market::Market;
+use gix::registry::{Self, ProviderRecord};
 use gix::staking::{Self, ProviderStake};
 use sui::balance::{Self, Balance};
 use sui::clock::Clock;
@@ -58,6 +59,12 @@ const REASON_INVALID_ATTESTATION: u8 = 4;
 const REASON_SLA_BREACH: u8 = 5;
 
 /// Permanent on-chain attestation summary, attached once the provider submits.
+///
+/// `output_hash` is the verification primitive (GIX's own `sha2_256` digest of the
+/// completion). `quote_blob_id` (M2, additive) is the Walrus `blob_id` COMMITMENT under
+/// which the signed attestation quote / receipt is stored — it is a storage pointer, NOT a
+/// content hash, so it sits alongside `output_hash` rather than replacing it. `0` means "no
+/// Walrus quote recorded" (e.g. the localnet mock path).
 public struct AttestationRecord has store, drop {
     measurement: vector<u8>,
     output_hash: vector<u8>,
@@ -66,6 +73,8 @@ public struct AttestationRecord has store, drop {
     t_end: u64,
     verified_at: u64,
     verdict: u8,
+    /// Walrus blob id of the attestation quote (commitment, not a hash). 0 = none.
+    quote_blob_id: u256,
 }
 
 public struct Job<phantom M> has key {
@@ -76,13 +85,27 @@ public struct Job<phantom M> has key {
     consumer: address,
     provider: address,
     state: u8,
+    /// M2: this Job was created via the DeepBook fill path (`create_job_from_fill`), so the
+    /// provider was ALREADY PAID USDC at the fill (off-chain to GIX) and there is NO escrow.
+    /// `false` for the M1 owned-credits (`create_job`) and Ask (`create_job_from_ask`) paths,
+    /// which DO hold a USDC escrow. Settlement branches on this: fill-jobs pay nothing extra
+    /// on success (just burn the credit) and, on fault, refund the consumer FROM the slash.
+    is_fill: bool,
     // content bindings
     input_hash: vector<u8>,
     output_hash: vector<u8>,
+    /// M2 (additive): Walrus blob id COMMITMENTS for the job I/O. `input_blob_id` is the
+    /// prompt blob the consumer committed at creation; `output_blob_id` is the completion
+    /// blob recorded at attestation. Both are commitments, NOT content hashes — GIX's own
+    /// `input_hash`/`output_hash` (`sha2_256`) remain the verification primitive. `0` = none.
+    input_blob_id: u256,
+    output_blob_id: u256,
     // economics
     scu_qty: u64,
     price_usdc: u64,
-    escrow: Escrow,
+    /// USDC escrow held against delivery. `some` for the M1 escrow paths; `none` for M2
+    /// fill-jobs (the provider was paid at the DeepBook match — Option B, pay-at-match).
+    escrow: Option<Escrow>,
     reserved_credits: Balance<Credit<M>>,
     // timing (epoch ms)
     created_at: u64,
@@ -136,9 +159,88 @@ public fun create_job<M>(
         ctx.sender(),
         credit::from_coin(credits),
         scu_qty,
-        escrow_in,
+        option::some(escrow::lock(escrow_in, ctx.sender())),
         price_usdc,
+        false, // M1 owned-credits path: USDC escrow held against delivery.
         input_hash,
+        0, // no Walrus input blob on the M1 owned-credits path
+        clk,
+        ctx,
+    )
+}
+
+// === Creation from a DeepBook fill (Option B — pay-at-match) ===
+
+/// Create a Job from a DeepBook fill: the M2 fill-job path. **Consumer-signed.** The consumer
+/// has, in the SAME PTB, swapped USDC→`Coin<Credit<M>>` on the market's DeepBook pool — which
+/// PAID THE PROVIDER (the resting maker) USDC AT THE FILL (off-chain to GIX) — and now feeds
+/// the returned credits straight into this function. Because the provider was already paid,
+/// **there is NO USDC escrow** for a fill-job (`escrow = none`). The consumer's protection is
+/// **refund-from-slash**: on a fault the provider's bond is slashed and the consumer is
+/// refunded in USDC out of the slash (the `k`-ratio guarantees the refund is covered).
+///
+/// Reserve-then-burn: the `credits` are real minted supply (the provider minted them to post
+/// the DeepBook ask). We reserve them into the Job and burn them at `settle_fill` — the
+/// mint→reserve→burn chain is preserved, and `consume_minted` retires the minted SCU. This
+/// path does NOT bump `reserved_scu` (the consumer cannot reach the provider's stake; minted
+/// capacity already bounds exposure — same accounting note as `create_job_from_ask`).
+///
+/// Provider assignment (M2 demo): a **single provider** serves the market (the GB10), so the
+/// caller passes that provider's `ProviderRecord` and the Job is bound to its operator. We
+/// assert the record's gpu_class is sane only by binding the operator address — there is no
+/// on-chain proof that THIS record was the DeepBook maker the swap filled against. Multi-
+/// provider trustless dispatch (resolving the filled `maker_balance_manager_id → owner()` and
+/// proving the credit provenance) is **DEFERRED** — see INTERFACE.md "DEFERRED".
+///
+/// Requires the market to have a bound DeepBook pool (`assert_has_deepbook_pool`).
+public fun create_job_from_fill<M>(
+    cfg: &Config,
+    market: &Market<M>,
+    provider_rec: &ProviderRecord,
+    credits: Coin<Credit<M>>,
+    input_blob_id: u256,
+    input_hash: vector<u8>,
+    clk: &Clock,
+    ctx: &mut TxContext,
+): ID {
+    cfg.assert_version();
+    cfg.assert_not_paused();
+    market.assert_active();
+    // M2 fill-jobs only exist against a market governance has wired to a DeepBook pool.
+    market.assert_has_deepbook_pool();
+
+    let scu_qty = credit::value(&credits);
+    assert!(scu_qty > 0, EZeroQty);
+
+    // ── DEFERRED: Walrus PoA / BlobCertified dispatch gate ──────────────────────────────
+    // A future revision will gate dispatch on the consumer's input blob being CERTIFIED on
+    // Walrus (Proof-of-Availability: `Blob.certified_epoch` set), so the provider can always
+    // fetch the prompt. That requires receiving the on-chain `walrus::blob::Blob` (or its
+    // certified-epoch proof) here and asserting availability. We deliberately DO NOT take a
+    // Walrus Move dependency in M2 (composition is PTB-level) and we record only the
+    // `input_blob_id` COMMITMENT below — the availability check is a no-op stub for now.
+    // ────────────────────────────────────────────────────────────────────────────────────
+
+    let provider = registry::provider_operator(provider_rec);
+
+    // No escrow: the provider was paid USDC at the fill. `price_usdc` records the work value
+    // (= scu_qty) so the slash→refund split has a value-at-risk to cap the consumer comp at.
+    // (In USDC terms the at-risk amount the consumer paid on DeepBook is off-chain; we use the
+    // SCU quantity as the per-job exposure unit, consistent with `bond_share`'s qty weighting.)
+    let price_usdc = scu_qty;
+
+    build_and_share<M>(
+        cfg,
+        market,
+        provider,
+        ctx.sender(),
+        credit::from_coin(credits),
+        scu_qty,
+        option::none(), // Option B: no USDC escrow — provider already paid at the fill.
+        price_usdc,
+        true, // fill-job
+        input_hash,
+        input_blob_id,
         clk,
         ctx,
     )
@@ -195,17 +297,21 @@ public fun create_job_from_ask<M>(
         ctx.sender(),
         credits,
         qty_scu,
-        escrow_in,
+        option::some(escrow::lock(escrow_in, ctx.sender())),
         price,
+        false, // M1.5 Ask path: USDC escrow held against delivery.
         input_hash,
+        0, // no Walrus input blob on the M1.5 Ask path
         clk,
         ctx,
     )
 }
 
-/// Shared Job constructor: locks escrow, copies SLA deadlines, advances to `Dispatched`,
-/// emits `JobCreated` + `Dispatched`, shares the Job and returns its `ID`. Used by both the
-/// owned-credits path (`create_job`) and the order-book path (`create_job_from_ask`).
+/// Shared Job constructor: stores the (optional) escrow, copies SLA deadlines, advances to
+/// `Dispatched`, emits `JobCreated` + `Dispatched`, shares the Job and returns its `ID`. Used
+/// by the owned-credits path (`create_job`), the order-book path (`create_job_from_ask`), and
+/// the DeepBook fill path (`create_job_from_fill`). `escrow_opt` is `some` for the escrow
+/// paths and `none` for fill-jobs (Option B — provider already paid at the match).
 fun build_and_share<M>(
     cfg: &Config,
     market: &Market<M>,
@@ -213,9 +319,11 @@ fun build_and_share<M>(
     consumer: address,
     credits: Balance<Credit<M>>,
     scu_qty: u64,
-    escrow_in: Coin<MOCK_USDC>,
+    escrow_opt: Option<Escrow>,
     price_usdc: u64,
+    is_fill: bool,
     input_hash: vector<u8>,
+    input_blob_id: u256,
     clk: &Clock,
     ctx: &mut TxContext,
 ): ID {
@@ -228,11 +336,14 @@ fun build_and_share<M>(
         consumer,
         provider,
         state: STATE_DISPATCHED,
+        is_fill,
         input_hash,
         output_hash: vector[],
+        input_blob_id,
+        output_blob_id: 0,
         scu_qty,
         price_usdc,
-        escrow: escrow::lock(escrow_in, consumer),
+        escrow: escrow_opt,
         reserved_credits: credits,
         created_at: now,
         ack_deadline: now + market.ack_deadline_ms(),
@@ -278,8 +389,13 @@ public(package) fun is_terminal<M>(job: &Job<M>): bool {
     job.state == STATE_SETTLED || job.state == STATE_REFUNDED || job.state == STATE_EXPIRED
 }
 
-public(package) fun escrow_mut<M>(job: &mut Job<M>): &mut Escrow { &mut job.escrow }
-public(package) fun escrow_ref<M>(job: &Job<M>): &Escrow { &job.escrow }
+/// Whether this job carries a USDC escrow (M1 escrow paths) vs. is a fill-job (Option B —
+/// no escrow, provider paid at the DeepBook match).
+public(package) fun has_escrow<M>(job: &Job<M>): bool { option::is_some(&job.escrow) }
+public(package) fun is_fill<M>(job: &Job<M>): bool { job.is_fill }
+
+public(package) fun escrow_mut<M>(job: &mut Job<M>): &mut Escrow { option::borrow_mut(&mut job.escrow) }
+public(package) fun escrow_ref<M>(job: &Job<M>): &Escrow { option::borrow(&job.escrow) }
 
 /// Take the reserved credit balance out of the Job (settlement burns it; refund returns
 /// it to the provider). Leaves a zero balance in its place.
@@ -287,8 +403,25 @@ public(package) fun take_reserved_credits<M>(job: &mut Job<M>): Balance<Credit<M
     balance::withdraw_all(&mut job.reserved_credits)
 }
 
+/// Drain the job's USDC escrow as a `Balance`. For an escrow job this withdraws the locked
+/// funds (leaving an empty, still-present escrow as the M1 paths do). For a fill-job there
+/// is NO escrow, so this returns a zero balance — settlement therefore moves no USDC out of
+/// a fill-job on the happy path (the provider was already paid at the DeepBook match).
+public(package) fun take_escrow_funds<M>(job: &mut Job<M>): Balance<MOCK_USDC> {
+    if (option::is_some(&job.escrow)) {
+        escrow::withdraw_all(option::borrow_mut(&mut job.escrow))
+    } else {
+        balance::zero<MOCK_USDC>()
+    }
+}
+
 /// Record the attestation result and advance state (Executing → Attested → Verified, or
 /// → flagged for refund on a failing verdict). Called by `attestation`.
+///
+/// M2 (additive): `output_blob_id` is the Walrus blob id of the completion and
+/// `quote_blob_id` the Walrus blob id of the signed attestation quote — both COMMITMENTS,
+/// stored alongside the `output_hash` (`sha2_256`) verification primitive, not in place of
+/// it. Pass `0` for either when there is no Walrus blob (e.g. the localnet mock path).
 public(package) fun record_attestation<M>(
     job: &mut Job<M>,
     measurement: vector<u8>,
@@ -298,9 +431,12 @@ public(package) fun record_attestation<M>(
     t_end: u64,
     verdict: u8,
     verified_at: u64,
+    output_blob_id: u256,
+    quote_blob_id: u256,
 ) {
     assert!(option::is_none(&job.attestation), EAlreadyAttested);
     job.output_hash = output_hash;
+    job.output_blob_id = output_blob_id;
     job.attestation = option::some(AttestationRecord {
         measurement,
         output_hash,
@@ -309,6 +445,7 @@ public(package) fun record_attestation<M>(
         t_end,
         verified_at,
         verdict,
+        quote_blob_id,
     });
     job.state = if (verdict == VERDICT_VALID) {
         STATE_VERIFIED
@@ -341,8 +478,20 @@ public fun job_provider<M>(job: &Job<M>): address { job.provider }
 public fun job_price<M>(job: &Job<M>): u64 { job.price_usdc }
 public fun job_qty<M>(job: &Job<M>): u64 { job.scu_qty }
 public fun job_slashed<M>(job: &Job<M>): bool { job.slashed }
-public fun job_escrow_value<M>(job: &Job<M>): u64 { escrow::value(&job.escrow) }
+/// Escrow value held by the job; `0` for a fill-job (Option B — no escrow).
+public fun job_escrow_value<M>(job: &Job<M>): u64 {
+    if (option::is_some(&job.escrow)) escrow::value(option::borrow(&job.escrow)) else 0
+}
 public fun job_output_hash<M>(job: &Job<M>): vector<u8> { job.output_hash }
+/// Whether this is a DeepBook fill-job (Option B — no escrow, provider paid at the match).
+public fun job_is_fill<M>(job: &Job<M>): bool { job.is_fill }
+/// Walrus blob id COMMITMENTS (not content hashes). `0` = none recorded.
+public fun job_input_blob_id<M>(job: &Job<M>): u256 { job.input_blob_id }
+public fun job_output_blob_id<M>(job: &Job<M>): u256 { job.output_blob_id }
+/// Walrus blob id of the attestation quote, if attested; `0` otherwise.
+public fun job_quote_blob_id<M>(job: &Job<M>): u256 {
+    if (option::is_some(&job.attestation)) option::borrow(&job.attestation).quote_blob_id else 0
+}
 
 // === State constant accessors (for tests / settlement) ===
 

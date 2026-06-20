@@ -91,6 +91,8 @@ public fun submit_mock_attestation<M>(
         t_end,
         verdict,
         now,
+        0, // mock path: no Walrus output blob
+        0, // mock path: no Walrus quote blob
     );
 
     events::attestation_submitted(
@@ -115,6 +117,12 @@ public fun submit_mock_attestation<M>(
 /// output_token_count, t_start, t_end)`, where `input_hash`/`output_hash` are the
 /// node-computed `sha2_256` digests of the prompt / completion (§2). The contract binds
 /// the digests it is given; it does not see the plaintext.
+///
+/// M2 (additive): `output_blob_id` / `quote_blob_id` are Walrus blob id COMMITMENTS for the
+/// completion blob and the attestation-quote blob. They are NOT part of the signed canonical
+/// message (the signature binds the `sha2_256` `output_hash`, the verification primitive; the
+/// blob ids are storage pointers, not content hashes), so the §2 byte layout is UNCHANGED and
+/// existing node signatures stay valid. Pass `0` for either when no Walrus blob applies.
 public fun submit_signed_attestation<M>(
     job: &mut Job<M>,
     cfg: &Config,
@@ -129,6 +137,8 @@ public fun submit_signed_attestation<M>(
     t_start: u64,
     t_end: u64,
     signature: vector<u8>,
+    output_blob_id: u256,
+    quote_blob_id: u256,
     clk: &Clock,
     ctx: &TxContext,
 ) {
@@ -177,6 +187,8 @@ public fun submit_signed_attestation<M>(
         t_end,
         verdict,
         now,
+        output_blob_id,
+        quote_blob_id,
     );
 
     events::attestation_submitted(
