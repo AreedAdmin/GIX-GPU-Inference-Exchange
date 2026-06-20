@@ -1,114 +1,135 @@
-# GPU Inference Exchange (GIX)
+<div align="center">
 
-> A decentralized, production-grade **spot market for GPU inference**, settled on Sui.
+<img src="assets/01-cover.svg" alt="GIX — GPU Inference Exchange. A decentralized spot market for verifiable GPU inference, settled on Sui." width="960"/>
 
-The GPU Inference Exchange (**GIX**) commoditizes computational power. It replaces
-centralized cloud provisioning with an algorithmic spot market: compute capacity
-becomes a liquid asset traded on a central limit order book (CLOB), and every job
-is governed by hardware-attested verification and autonomous on-chain settlement
-rather than trust in a single provider.
+<br/>
 
-This repository is currently **documentation-first**. It contains the full
-production engineering plan — architecture, protocol, tokenomics, threat model,
-and roadmap — that the implementation will be built against.
+**A decentralized spot market for *verifiable* GPU inference — settled on Sui.**
+
+[![status](https://img.shields.io/badge/status-live%20on%20testnet-2D5BE3?style=flat-square)](docs/roadmap.md)
+[![milestone](https://img.shields.io/badge/milestone-M2%20·%20DeepBook%20%2B%20Walrus-1F9D6B?style=flat-square)](docs/m2-scope.md)
+[![chain](https://img.shields.io/badge/Sui-Move-0E1116?style=flat-square)](contracts/)
+[![license](https://img.shields.io/badge/license-Apache--2.0-3D5AAE?style=flat-square)](LICENSE)
+
+### ▶ &nbsp;[Open the interactive pitch deck → `readme.html`](readme.html)
+<sub>(open it locally in a browser, or via GitHub Pages — the slides below are the same deck, embedded)</sub>
+
+</div>
 
 ---
 
-## The thesis
+GIX turns GPU inference into a **liquid, exchange-traded commodity**. Compute is matched on a
+central limit order book, every job is **proven by hardware attestation and verified on-chain**,
+and payment settles autonomously — no trust in any single provider, and no black-box API.
 
-| Layer | Technology | Role |
+| Layer | Tech | Role |
 | --- | --- | --- |
-| **Matching** | **DeepBook** | Central limit order book where tokenized compute supply meets demand continuously, establishing a real-time spot price without auction latency. |
-| **Storage & Audit** | **Walrus** | Decentralized storage for model artifacts, job inputs/outputs, and attestation evidence — the tamper-evident audit trail. |
-| **Orchestration & Settlement** | **Sui** | Move smart contracts enforce market rules, escrow consumer funds, verify node attestations, and settle payment or slash collateral autonomously. |
-
-Because each inference job and its escrow are independent Sui objects, the protocol
-settles thousands of compute transactions in parallel with sub-second finality.
-
-## How a job flows (one paragraph)
-
-A provider mints **Compute Credits** for its market and posts asks on a DeepBook
-pool priced in **USDC**. A consumer's bid is matched; Sui locks the consumer's
-USDC in **escrow** and binds a **Job** object to the fill. The provider's node
-pulls the input from Walrus, runs the exact attested model inside a hardware TEE,
-writes the output and a signed **attestation quote** back to Walrus, and submits
-the attestation to Sui. The `attestation` contract verifies the vendor signature
-chain, the model/input/output hash binding, and the latency SLA. On success the
-escrow is released to the provider; on a missing or invalid attestation the
-consumer is refunded and the provider's staked **GIX** collateral is slashed.
-
-See **[docs/architecture/overview.md](docs/architecture/overview.md)** for the full picture.
+| **Match** | **DeepBook v3** | A live CLOB where compute supply meets demand — a real-time spot price, no auction latency. |
+| **Verify** | **TEE attestation** | A hardware-signed quote, checked **on-chain**, proves the *right model ran on your input*. |
+| **Settle** | **Sui + Walrus** | USDC escrow released only on a verified proof; a tamper-evident audit trail on Walrus. |
 
 ---
 
-## Core design decisions
+## How it works
 
-These are locked for v1 and are the source of truth for every other document:
+<div align="center">
+<img src="assets/02-architecture.svg" alt="GIX architecture" width="960"/>
+</div>
 
-- **Verification — hardware TEE remote attestation only.** Confidential-computing
-  GPUs (e.g. NVIDIA H100/H200 CC) plus a CPU TEE (Intel TDX / AMD SEV-SNP) produce
-  a vendor-signed quote binding the runtime measurement, model hash, input hash,
-  output hash, and execution timestamps. Sui verifies the signature chain against a
-  governance-managed measurement allowlist. **No zero-knowledge proofs and no
-  re-execution challenges in v1.** zkML is an explicit non-goal tracked as future
-  research (see [verification doc](docs/architecture/verification-attestation.md)).
-  *(v1 MVP scope, 2026-06: CPU TEE = **Intel TDX (P-256)** only — natively verifiable on
-  Sui; **AMD SEV-SNP deferred** (P-384) and **on-chain GPU-CC verification phased to a
-  post-MVP fast-follow**. See verification doc §4.)*
-- **Privacy — integrity-only in v1.** The TEE attests *correct execution*, not data
-  secrecy; operators may observe inputs. Confidential markets (TEE-isolated I/O) are
-  a roadmap item, not a v1 guarantee.
-- **Market — tokenized Compute Credits.** Each market is a `(GPU class, model/runtime
-  tier, SLA class)` tuple with its own fungible Compute Credit coin, traded against
-  **USDC** on a DeepBook pool.
-- **Settlement asset — USDC** (Circle-native on Sui). **Native token — GIX** for
-  provider staking/collateral, governance, and fee economics.
-- **Stack —** Sui **Move** contracts (`gix` package), **Rust** node + off-chain
-  services, **TypeScript** SDK.
+Demand (consumer / SDK / OpenAI-compatible API) and supply (provider node + TEE) meet on a
+**DeepBook** pool. A fill creates an escrowed **Job** on the **`gix`** Move package, which is the
+**sole settlement authority** — off-chain services optimize liveness but can never move funds or
+fake a result. Artifacts live on **Walrus**, content-addressed; Sui holds only their hashes.
+→ [architecture overview](docs/architecture/overview.md)
+
+## Paid only for proven work
+
+<div align="center">
+<img src="assets/03-lifecycle.svg" alt="Job lifecycle and on-chain trust model" width="960"/>
+</div>
+
+Escrow releases **only** on a verified attestation. The contract checks the vendor signature
+chain, that the measurement is allowlisted (the *right* model), that the model/input/output
+hashes bind the Job, and that it was within SLA. A bad or missing proof → **refund the consumer,
+slash the provider**. → [verification & attestation](docs/architecture/verification-attestation.md)
+
+## Plug in like any inference API
+
+<div align="center">
+<img src="assets/04-product.svg" alt="Drop-in OpenAI-compatible API and key functionality" width="960"/>
+</div>
+
+AI apps point an **OpenAI-compatible** client at the gateway; the matching, escrow, and
+settlement are abstracted away. The wedge isn't *cheapest tokens* — it's **verifiable, neutral,
+pay-per-inference** compute for trust-sensitive, agentic, bursty, and long-tail workloads.
+
+## Built end-to-end · live on testnet
+
+<div align="center">
+<img src="assets/05-status.svg" alt="Status and roadmap" width="960"/>
+</div>
+
+A full vertical slice runs today: real `llama3.1:8b` inference, bought **on-chain** with USDC,
+attested with a registered-key signature **verified on-chain**, settled to the provider, and
+returned **hash-verified** — through both the gateway and the web console.
+→ [demo runbook](DEMO.md) · [roadmap](docs/roadmap.md)
 
 ---
 
-## Repository layout
+## Locked v1 decisions
 
+- **Verification — hardware TEE attestation only** (no zkML, no re-execution in v1). MVP scope:
+  CPU TEE = **Intel TDX (P-256)**, natively verifiable on Sui; AMD SEV-SNP and **on-chain GPU-CC
+  verification are a post-MVP fast-follow**. → [verification §4/§9](docs/architecture/verification-attestation.md)
+- **Privacy — integrity-only in v1.** Confidential markets (sealed I/O via **Seal**) are a roadmap item.
+- **Match — DeepBook v3** over per-market Compute Credits (`Credit⟨M⟩ / USDC`).
+- **Settle in USDC.** The native **GIX token is deferred to post-MVP** — v1 bonds are USDC,
+  governance is an `AdminCap`/multisig. → [tokenomics](docs/tokenomics.md)
+- **Stack —** Move (`gix`), TypeScript (node, SDK, gateway, web, harness).
+
+## What's built
+
+| Component | Path | Notes |
+| --- | --- | --- |
+| **Contracts** | [`contracts/`](contracts/) | `gix` Move package — 14 modules + tests, deployed to testnet |
+| **Provider node** | [`node/`](node/) | TypeScript; Ollama runtime adapter; Ed25519 attestation; DeepBook + Walrus |
+| **Gateway** | [`services/gateway/`](services/gateway/) | OpenAI-compatible inference API over the market |
+| **SDK** | [`sdk/`](sdk/) | TypeScript consumer/provider client + Walrus tooling |
+| **Web** | [`web/`](web/) | React/Vite trading console |
+| **Harness** | [`harness/`](harness/) | Multi-actor simulation & load-test harness |
+| **Examples** | [`examples/`](examples/) | GPU-less buyer client (two-machine demo) |
+| **Ops** | [`ops/`](ops/) | localnet / deploy / fund / demo scripts |
+
+## Quickstart
+
+```bash
+# 1. open the pitch deck
+open readme.html                      # or: python3 -m http.server, then visit /readme.html
+
+# 2. contracts (Sui Move)
+cd contracts && sui move test
+
+# 3. check your testnet wallet (deploy targets are in deployment.testnet.json)
+sui client switch --env testnet && sui client balance
 ```
-gpu-inference-exchange/
-├── contracts/   # Sui Move package `gix` (markets, escrow, attestation, settlement…)
-├── node/        # Rust GPU node — the provider software (inference + attestation)
-├── services/    # Rust off-chain services (indexer, matching relayer, settlement watcher)
-├── sdk/         # TypeScript SDK for consumers and providers
-├── examples/    # Sample consumer & provider integrations
-├── ops/         # Deployment / infrastructure (future)
-└── docs/        # The production engineering plan (start here)
-```
 
-## Documentation index
+See [`DEMO.md`](DEMO.md) for the full end-to-end runbook and
+[`docs/two-machine-networking.md`](docs/two-machine-networking.md) for the buyer↔seller topology.
 
-Start with the overview, then read by area. See **[docs/README.md](docs/README.md)**
-for the annotated index.
+## Documentation
 
-| Document | What it covers |
+Start with the **[overview](docs/architecture/overview.md)** (canonical) and the
+**[glossary](docs/glossary.md)**, then read by area via **[docs/README.md](docs/README.md)**.
+Decisions that still need a human answer live in
+**[docs/open-ended-questions.md](docs/open-ended-questions.md)**.
+
+| Area | Doc |
 | --- | --- |
-| [Architecture Overview](docs/architecture/overview.md) | System architecture, components, end-to-end lifecycle, object & module map. **Canonical.** |
-| [Sui / Move Contracts](docs/architecture/sui-move-contracts.md) | Move package design, modules, object model, entry functions, events, parallelism, upgradeability. |
-| [DeepBook Integration](docs/architecture/deepbook-integration.md) | Compute-credit tokenization, market/pool structure, order placement & matching, price discovery. |
-| [Walrus Integration](docs/architecture/walrus-integration.md) | Model registry, content addressing, I/O & attestation blob storage, availability, audit trail. |
-| [Verification & Attestation](docs/architecture/verification-attestation.md) | TEE hardware, attestation flow, quote contents, on-chain verification, slashing triggers, zkML non-goal. |
-| [Node Architecture](docs/architecture/node-architecture.md) | Rust provider node: agent, runtime adapters, attestation, Walrus/Sui clients, SLA metering. |
-| [TypeScript SDK](docs/architecture/sdk.md) | Consumer/provider client API, order flow, job submission, result & audit retrieval. |
-| [Task Lifecycle & State Machine](docs/protocol/task-lifecycle.md) | Detailed job state machine, timeouts, edge cases, settlement/refund/slash paths. |
-| [Tokenomics](docs/tokenomics.md) | USDC settlement, GIX token, Compute Credits, staking, fees, emissions, incentives. |
-| [Threat Model](docs/security/threat-model.md) | Assets, trust boundaries, per-component threats, mitigations, economic & TEE risks, residual risk. |
-| [Deployment & Operations](docs/operations/deployment.md) | Networks, contract deployment, node operator runbook, monitoring, incident response. |
-| [Roadmap](docs/roadmap.md) | Phased plan from devnet MVP to mainnet, with production-readiness gates. |
-| [Glossary](docs/glossary.md) | Canonical terminology and identifiers. |
-
----
-
-## Status
-
-**Phase 0 — Design.** No code yet; this is the engineering plan. The implementation
-roadmap and production-readiness gates are in [docs/roadmap.md](docs/roadmap.md).
+| Architecture (canonical) | [overview](docs/architecture/overview.md) · [contracts](docs/architecture/sui-move-contracts.md) · [DeepBook](docs/architecture/deepbook-integration.md) · [Walrus](docs/architecture/walrus-integration.md) · [verification](docs/architecture/verification-attestation.md) · [node](docs/architecture/node-architecture.md) · [SDK](docs/architecture/sdk.md) |
+| Protocol | [task lifecycle](docs/protocol/task-lifecycle.md) |
+| Economics & security | [tokenomics](docs/tokenomics.md) · [threat model](docs/security/threat-model.md) |
+| Plan & ops | [roadmap](docs/roadmap.md) · [deployment](docs/operations/deployment.md) · [M2 scope](docs/m2-scope.md) |
 
 ## License
 
-To be determined before first public release.
+[Apache-2.0](LICENSE).
