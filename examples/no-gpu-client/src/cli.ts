@@ -32,6 +32,9 @@ interface Args {
   ask?: string;
   provider?: string;
   rpc?: string;
+  path?: "ask" | "fill";
+  pool?: string;
+  record?: string;
   help: boolean;
 }
 
@@ -64,6 +67,15 @@ function parseArgs(argv: string[]): Args {
       case "--rpc":
         a.rpc = argv[++i];
         break;
+      case "--path":
+        a.path = argv[++i] === "fill" ? "fill" : "ask";
+        break;
+      case "--pool":
+        a.pool = argv[++i];
+        break;
+      case "--record":
+        a.record = argv[++i];
+        break;
       case "--help":
       case "-h":
         a.help = true;
@@ -88,14 +100,24 @@ Options:
   -c, --config <path>   Path to a config.json (overrides bundled deployment.json).
       --fund            Self-fund the wallet (SUI gas + MOCK_USDC) before buying.
       --scu <n>         SCU quantity to buy (default 1).
-      --ask <0x..>      Provider's shared Ask<M> id (else ASK_ID / config).
+      --path <ask|fill> Buy path: "ask" (localnet shared-Ask) or "fill" (M2
+                        DeepBook swap → create_job_from_fill). Default: testnet ⇒
+                        fill, else ask.
+      --ask <0x..>      Provider's shared Ask<M> id (ask path; else ASK_ID).
+      --pool <0x..>     DeepBook pool id (fill path; else DEEPBOOK_POOL_ID /
+                        deployment.markets[].deepbookPoolId).
+      --record <0x..>   Provider's ProviderRecord id (fill path; else
+                        PROVIDER_RECORD_ID).
       --provider <url>  Provider base URL (else PROVIDER_URL / config).
       --rpc <url>       Sui RPC URL (else RPC_URL / network default).
   -h, --help            Show this help.
 
 Config sources (low->high): bundled deployment.json < config.json < env < flags.
-ASK_ID + PROVIDER_URL come from the running provider node; the chain ids default
-from deployment.json. Wallet persists in ./.wallet (gitignored).
+The buy path defaults to the M2 DeepBook fill on testnet (pool from
+deployment.markets[].deepbookPoolId), and the localnet shared-Ask otherwise. The
+node seams (ASK_ID, or DEEPBOOK_POOL_ID + PROVIDER_RECORD_ID) come from the
+running provider / testnet deploy; chain ids default from deployment.json. Wallet
+persists in ./.wallet (gitignored).
 `;
 
 function fmtUsdc(base: bigint | number | undefined): string {
@@ -126,6 +148,9 @@ async function main(): Promise<void> {
         ...(args.provider ? { providerUrl: args.provider } : {}),
         ...(args.rpc ? { rpcUrl: args.rpc } : {}),
         ...(args.scuQty ? { scuQty: args.scuQty } : {}),
+        ...(args.path ? { buyPath: args.path } : {}),
+        ...(args.pool ? { deepbookPoolId: args.pool } : {}),
+        ...(args.record ? { providerRecordId: args.record } : {}),
       },
     });
   } catch (e) {
@@ -146,9 +171,9 @@ async function main(): Promise<void> {
   log(`          ${created ? "(new wallet generated)" : "(loaded)"} -> ${WALLET_PATH}`);
   log(`Network:  ${cfg.network}  RPC ${cfg.rpcUrl}`);
 
-  const { SuiClient } = await import("@mysten/sui/client");
+  const { SuiJsonRpcClient } = await import("@mysten/sui/jsonRpc");
   const { Transaction } = await import("@mysten/sui/transactions");
-  const client = new SuiClient({ url: cfg.rpcUrl });
+  const client = new SuiJsonRpcClient({ network: cfg.network, url: cfg.rpcUrl });
   const chain = new Chain(
     client as unknown as ConstructorParameters<typeof Chain>[0],
     Transaction as unknown as new () => InstanceType<typeof Transaction>,
@@ -157,8 +182,10 @@ async function main(): Promise<void> {
       configId: cfg.configId,
       marketId: cfg.marketId,
       creditType: cfg.creditType,
+      creditCoinType: cfg.creditCoinType,
       usdcType: cfg.usdcType,
       clockId: cfg.clockId,
+      network: cfg.network,
       logger: (m, x) => log(`  · ${m}${x ? " " + JSON.stringify(x) : ""}`, true),
     },
   );
@@ -213,29 +240,76 @@ async function main(): Promise<void> {
   }
   log(`inputHash: ${localInputHash}`);
 
-  // 5. Read the ask, then create_job_from_ask funding the exact escrow.
-  const ask = await chain.readAsk(cfg.askId);
+  // 5. Buy compute — network-switched. Testnet ⇒ M2 DeepBook fill (swap →
+  //    create_job_from_fill, one PTB, pay-at-match); else ⇒ M1.5 shared-Ask
+  //    escrow fill. Both produce a Job id to poll.
   const scuQty = BigInt(cfg.scuQty);
-  if (ask.remainingScu < scuQty) {
-    fail(`ask ${cfg.askId} has only ${ask.remainingScu} SCU remaining (< ${scuQty} requested)`);
-    return;
-  }
-  const escrow = scuQty * ask.pricePerScu;
-  log(`Ask:      ${cfg.askId}`);
-  log(`          price ${fmtUsdc(ask.pricePerScu)}/SCU · buying ${scuQty} SCU · escrow ${fmtUsdc(escrow)}`);
-  if (usdcBal < escrow) {
-    fail(`insufficient MOCK_USDC: have ${fmtUsdc(usdcBal)}, need ${fmtUsdc(escrow)}. Re-run with --fund.`);
-    return;
-  }
+  let jobId: string;
+  let digest: string;
+  let cost: bigint;
 
-  log("Buying compute (create_job_from_ask)…");
-  const { jobId, digest } = await chain.createJobFromAsk({
-    keypair: wallet.keypair,
-    askId: cfg.askId,
-    scuQty,
-    pricePerScu: ask.pricePerScu,
-    inputHashHex: localInputHash,
-  });
+  if (cfg.buyPath === "fill") {
+    // ── M2 testnet DeepBook fill path (Option B / pay-at-match) ───────────────
+    // Discover the pool mid so we size the USDC spend; cap value-at-risk at
+    // scuQty * mid (with headroom). The swap pays the provider at the fill.
+    const mid = await chain.deepbookMidPrice(cfg.deepbookPoolId, cfg.creditCoinType, cfg.usdcType);
+    // Spend up to scuQty * mid * 1.5 (slippage headroom); the swap returns the
+    // unspent USDC. If mid is unknown, fall back to the whole balance cap.
+    const maxQuoteIn =
+      mid > 0
+        ? BigInt(Math.ceil(scuQty.valueOf() === 0n ? 0 : Number(scuQty) * mid * 1.5 * 1_000_000))
+        : usdcBal;
+    log(`Pool:     ${cfg.deepbookPoolId}`);
+    log(
+      `          DeepBook mid ${mid > 0 ? mid.toPrecision(4) : "n/a"} USDC/SCU · buying ${scuQty} SCU · ` +
+        `max spend ${fmtUsdc(maxQuoteIn)}`,
+    );
+    if (usdcBal < maxQuoteIn) {
+      fail(`insufficient MOCK_USDC: have ${fmtUsdc(usdcBal)}, want headroom ${fmtUsdc(maxQuoteIn)}. Re-run with --fund.`);
+      return;
+    }
+
+    log("Buying compute (DeepBook swap → create_job_from_fill)…");
+    const out = await chain.createJobFromFill({
+      keypair: wallet.keypair,
+      poolId: cfg.deepbookPoolId,
+      providerRecordId: cfg.providerRecordId,
+      scuQty,
+      maxQuoteIn,
+      deepIn: cfg.deepIn,
+      inputBlobId: 0n, // Walrus input-blob upload is the SDK Walrus-helper seam (deferred here)
+      inputHashHex: localInputHash,
+    });
+    jobId = out.jobId;
+    digest = out.digest;
+    cost = maxQuoteIn; // upper bound; actual = mid * qty, leftover refunded by the swap
+  } else {
+    // ── M1.5 localnet shared-Ask path (escrow fill) ──────────────────────────
+    const ask = await chain.readAsk(cfg.askId);
+    if (ask.remainingScu < scuQty) {
+      fail(`ask ${cfg.askId} has only ${ask.remainingScu} SCU remaining (< ${scuQty} requested)`);
+      return;
+    }
+    const escrow = scuQty * ask.pricePerScu;
+    log(`Ask:      ${cfg.askId}`);
+    log(`          price ${fmtUsdc(ask.pricePerScu)}/SCU · buying ${scuQty} SCU · escrow ${fmtUsdc(escrow)}`);
+    if (usdcBal < escrow) {
+      fail(`insufficient MOCK_USDC: have ${fmtUsdc(usdcBal)}, need ${fmtUsdc(escrow)}. Re-run with --fund.`);
+      return;
+    }
+
+    log("Buying compute (create_job_from_ask)…");
+    const out = await chain.createJobFromAsk({
+      keypair: wallet.keypair,
+      askId: cfg.askId,
+      scuQty,
+      pricePerScu: ask.pricePerScu,
+      inputHashHex: localInputHash,
+    });
+    jobId = out.jobId;
+    digest = out.digest;
+    cost = escrow;
+  }
   log(`jobId:    ${jobId}`);
   log(`tx:       ${digest}`);
   if (cfg.explorerTxBase) log(`          ${cfg.explorerTxBase}/${digest}`);
@@ -257,7 +331,7 @@ async function main(): Promise<void> {
     verified,
     jobId,
     digest,
-    cost: terminal.payoutUsdc ?? Number(escrow),
+    cost: terminal.payoutUsdc ?? Number(cost),
     latencyMs,
     model: result.model,
     explorer: cfg.explorerTxBase ? `${cfg.explorerTxBase}/${digest}` : undefined,

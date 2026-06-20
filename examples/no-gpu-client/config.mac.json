@@ -9,7 +9,7 @@
   "USDC_TYPE": "0xc3bb6a23f7ca3b52ff86f05265dbd0a53ea0dbe928ef1be984bbfac6af5d0418::mock_usdc::MOCK_USDC",
   "FAUCET_ID": "0x6625e97ec3c0beab19abea2ce0a7bf7d78bb0f3d42e3a3dfbbc50573e611ceab",
   "CLOCK_ID": "0x6",
-  "ASK_ID": "0xdcec46436ee2f4e5e86756dadf962b35b4c8e47ac6c3b65f8d9ca742bba80124",
+  "ASK_ID": "0xe64cc22c50d55048095b1913774a6903db47f2f87fd049b4e6e37a2beaef7db6",
   "PROVIDER_URL": "http://192.168.1.81:8081",
   "SCU_QTY": 1,
   "EXPLORER_TX_BASE": "http://192.168.1.81:9000"

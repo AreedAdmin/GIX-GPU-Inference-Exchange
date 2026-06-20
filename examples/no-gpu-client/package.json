@@ -17,7 +17,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@mysten/sui": "^1.37.0"
+    "@mysten/deepbook-v3": "^1.5.1",
+    "@mysten/sui": "^2.19.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

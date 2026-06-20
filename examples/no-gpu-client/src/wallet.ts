@@ -16,7 +16,7 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import type { SuiClient } from "@mysten/sui/client";
+import type { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import type { GixConfig } from "./config.js";
 
 export const WALLET_PATH = resolve(process.cwd(), ".wallet");
@@ -59,13 +59,11 @@ export async function fundSui(cfg: GixConfig, address: string): Promise<string> 
       ? "mainnet has no faucet — fund SUI manually"
       : "no SUI faucet configured (set SUI_FAUCET_URL)";
   }
-  const { requestSuiFromFaucetV2, requestSuiFromFaucetV1, requestSuiFromFaucetV0 } =
-    await import("@mysten/sui/faucet");
-  // Try the newest faucet protocol first, fall back across versions.
+  const { requestSuiFromFaucetV2 } = await import("@mysten/sui/faucet");
+  // @mysten/sui 2.x only ships the v2 faucet protocol (v1/v0 were removed); modern
+  // localnet/devnet/testnet faucets all speak v2.
   const attempts: Array<() => Promise<unknown>> = [
     () => requestSuiFromFaucetV2({ host: cfg.suiFaucetUrl, recipient: address }),
-    () => requestSuiFromFaucetV1({ host: cfg.suiFaucetUrl, recipient: address }),
-    () => requestSuiFromFaucetV0({ host: cfg.suiFaucetUrl, recipient: address }),
   ];
   let lastErr: unknown;
   for (const attempt of attempts) {
@@ -85,7 +83,7 @@ export async function fundSui(cfg: GixConfig, address: string): Promise<string> 
  * Needs the wallet to already hold a little SUI for gas, so call after fundSui.
  */
 export async function fundUsdc(
-  client: SuiClient,
+  client: SuiJsonRpcClient,
   cfg: GixConfig,
   wallet: Wallet,
   amount: bigint,

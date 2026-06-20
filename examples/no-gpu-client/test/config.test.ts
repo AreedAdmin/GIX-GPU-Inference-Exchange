@@ -65,7 +65,9 @@ describe("config loader — deployment.json defaults", () => {
   it("requireAll:false defers the node-seam check (wallet/--fund path)", () => {
     const cfg = loadConfig({ deploymentPath, env: noEnv, requireAll: false });
     expect(cfg.packageId).toBe(PKG);
-    expect(missingRequired(cfg)).toEqual(["askId", "providerUrl"]);
+    // localnet ⇒ ask path; askId is the only unfilled node seam (providerUrl too).
+    expect(cfg.buyPath).toBe("ask");
+    expect(missingRequired(cfg).sort()).toEqual(["askId", "providerUrl"]);
   });
 });
 
@@ -108,14 +110,51 @@ describe("config loader — precedence", () => {
   });
 
   it("testnet network picks testnet RPC + explorer defaults", () => {
+    // testnet ⇒ the M2 DeepBook fill path; supply its node seams so validation
+    // passes (the assertions here are about network-derived defaults).
     const cfg = loadConfig({
       deploymentPath,
-      env: { GIX_NETWORK: "testnet", ASK_ID: "0xASK", PROVIDER_URL: "http://node" },
+      env: {
+        GIX_NETWORK: "testnet",
+        PROVIDER_URL: "http://node",
+        DEEPBOOK_POOL_ID: "0xPOOL",
+        CREDIT_COIN_TYPE: `0x2::coin::Coin<${PKG}::credit::Credit<${PKG}::markets::M_H100_LLAMA8B>>`,
+        PROVIDER_RECORD_ID: "0xREC",
+      },
     });
     expect(cfg.network).toBe("testnet");
+    expect(cfg.buyPath).toBe("fill");
     expect(cfg.rpcUrl).toContain("testnet");
     expect(cfg.explorerTxBase).toContain("testnet");
     expect(cfg.suiFaucetUrl).toContain("testnet");
+    expect(missingRequired(cfg)).toEqual([]);
+  });
+
+  it("testnet defaults to the fill path; localnet to the ask path", () => {
+    const tn = loadConfig({
+      deploymentPath,
+      env: { GIX_NETWORK: "testnet" },
+      requireAll: false,
+    });
+    expect(tn.buyPath).toBe("fill");
+    // fill path needs the DeepBook seams instead of an Ask id.
+    expect(missingRequired(tn).sort()).toEqual([
+      "creditCoinType",
+      "deepbookPoolId",
+      "providerRecordId",
+      "providerUrl",
+    ]);
+
+    const ln = loadConfig({ deploymentPath, env: noEnv, requireAll: false });
+    expect(ln.buyPath).toBe("ask");
+
+    // BUY_PATH explicitly overrides the network default.
+    const forced = loadConfig({
+      deploymentPath,
+      env: { GIX_NETWORK: "testnet", BUY_PATH: "ask" },
+      requireAll: false,
+    });
+    expect(forced.buyPath).toBe("ask");
   });
 });
 

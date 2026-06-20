@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCreateJobFromAskPlan,
+  buildCreateJobFromFillPlan,
   escrowFor,
 } from "../src/chain.js";
 import { hexToBytes, sha2_256Hex } from "../src/hash.js";
@@ -89,5 +90,80 @@ describe("create_job_from_ask PTB plan (two-account buy)", () => {
     expect(escrowFor(1n, 1n)).toBe(1n);
     expect(escrowFor(3n, 7n)).toBe(21n);
     expect(escrowFor(1000n, 1000n)).toBe(1_000_000n);
+  });
+});
+
+/**
+ * Assert the M2 create_job_from_fill PTB plan against contracts/INTERFACE.md:
+ *   job::create_job_from_fill<M>(
+ *     cfg, market: &Market<M>, provider_rec: &ProviderRecord,
+ *     credits: Coin<Credit<M>>, input_blob_id: u256, input_hash: vector<u8>,
+ *     clk: &Clock, ctx): ID
+ * The credits arg is the DeepBook swap output (a PTB result); there is NO escrow
+ * coin (Option B / pay-at-match — the provider was paid USDC at the fill).
+ */
+const fillBlobId = 123456789012345678901234567890n;
+const fillPlan = buildCreateJobFromFillPlan({
+  packageId: PKG,
+  configId: "0xCFG",
+  marketId: "0xMARKET",
+  providerRecordId: "0xREC",
+  creditType: CREDIT_TYPE,
+  clockId: "0x6",
+  inputBlobId: fillBlobId,
+  inputHashHex,
+});
+
+describe("create_job_from_fill PTB plan (M2 DeepBook fill)", () => {
+  it("targets job::create_job_from_fill", () => {
+    expect(fillPlan.createJob.target).toBe(`${PKG}::job::create_job_from_fill`);
+  });
+
+  it("passes the Credit<M> witness as the sole type-arg", () => {
+    expect(fillPlan.createJob.typeArguments).toEqual([CREDIT_TYPE]);
+  });
+
+  it("has exactly 7 PTB-visible args in the contract order", () => {
+    const roles = fillPlan.createJob.arguments.map((a) => a.role);
+    expect(roles).toEqual([
+      "cfg",
+      "market: &Market<M>",
+      "provider_rec: &ProviderRecord",
+      "credits: Coin<Credit<M>>",
+      "input_blob_id",
+      "input_hash",
+      "clk",
+    ]);
+  });
+
+  it("cfg/market/provider_rec/clk are object refs to the right ids", () => {
+    const a = fillPlan.createJob.arguments;
+    expect(a[0]).toMatchObject({ kind: "object", id: "0xCFG" });
+    expect(a[1]).toMatchObject({ kind: "object", id: "0xMARKET" });
+    expect(a[2]).toMatchObject({ kind: "object", id: "0xREC" });
+    expect(a[6]).toMatchObject({ kind: "object", id: "0x6" });
+  });
+
+  it("credits is the DeepBook swap PTB result (no escrow coin)", () => {
+    const a = fillPlan.createJob.arguments;
+    expect(a[3]).toMatchObject({ kind: "result", from: "swapCredits" });
+    // NO escrow coin anywhere — Option B pays the provider at the swap.
+    const roles = a.map((x) => x.role).join(" ");
+    expect(roles).not.toMatch(/escrow/i);
+  });
+
+  it("input_blob_id is a u256 Walrus commitment", () => {
+    const a = fillPlan.createJob.arguments[4]!;
+    expect(a.kind).toBe("u256");
+    if (a.kind === "u256") expect(a.value).toBe(fillBlobId);
+  });
+
+  it("input_hash is the sha2_256 prompt digest as a 32-byte vector<u8>", () => {
+    const a = fillPlan.createJob.arguments[5]!;
+    expect(a.kind).toBe("vector<u8>");
+    if (a.kind === "vector<u8>") {
+      expect(a.bytes).toEqual(hexToBytes(inputHashHex));
+      expect(a.bytes).toHaveLength(32);
+    }
   });
 });
