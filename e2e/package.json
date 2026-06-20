@@ -1,0 +1,33 @@
+{
+  "name": "@gix/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GIX end-to-end acceptance harness for the pool-free (direct/Ask) path. Drives register→stake→post_ask→create_job_from_ask→serve→attest→settle against localnet (mock node) or testnet (real GB10), asserting every escrow/attestation/settlement invariant inline and exiting nonzero on any violation.",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "gix-e2e": "./harness.ts"
+  },
+  "scripts": {
+    "e2e:local": "tsx harness.ts --net=localnet --node=mock --scenario=happy",
+    "e2e:local:negatives": "tsx harness.ts --net=localnet --node=mock --scenario=negatives",
+    "e2e:local:load": "tsx harness.ts --net=localnet --node=mock --scenario=load",
+    "e2e:local:all": "tsx harness.ts --net=localnet --node=mock --scenario=all",
+    "e2e:testnet": "tsx harness.ts --net=testnet --node=gb10 --scenario=happy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mysten/sui": "^2.19.0",
+    "@noble/ed25519": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
