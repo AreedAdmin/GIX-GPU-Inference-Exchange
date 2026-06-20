@@ -52,6 +52,24 @@ export interface WalrusHelperOptions {
   epochs?: number;
   /** Optional logger. */
   logger?: (msg: string, meta?: Record<string, unknown>) => void;
+  /**
+   * Optional upload-relay config. Writing a blob directly to the ~hundreds of
+   * testnet storage nodes is ~2200 requests and is flaky against slow nodes
+   * (NotEnoughBlobConfirmationsError). Pointing at an upload relay offloads the
+   * sliver writes to a server and is far more reliable. Passed straight through
+   * to `@mysten/walrus`'s `WalrusClient` (`{ host, sendTip }`).
+   */
+  uploadRelay?: { host: string; sendTip?: { max?: number; address?: string; kind?: unknown } };
+  /**
+   * Optional storage-node fetch tuning (e.g. a longer `timeout` to survive slow
+   * testnet nodes whose default 10s connect timeout causes write failures).
+   * Passed straight through to `@mysten/walrus`.
+   */
+  storageNodeClientOptions?: {
+    timeout?: number;
+    fetch?: (url: string, options: unknown) => Promise<Response>;
+    onError?: (error: unknown) => void;
+  };
 }
 
 /**
@@ -82,7 +100,11 @@ export class WalrusHelper {
     this.client = new WalrusClient({
       network: this.network,
       suiClient: this.opts.suiClient as unknown as never,
-    });
+      ...(this.opts.uploadRelay ? { uploadRelay: this.opts.uploadRelay } : {}),
+      ...(this.opts.storageNodeClientOptions
+        ? { storageNodeClientOptions: this.opts.storageNodeClientOptions }
+        : {}),
+    } as unknown as never);
     return this.client;
   }
 
