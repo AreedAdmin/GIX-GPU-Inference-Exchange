@@ -3,3 +3,4 @@ dist/
 .keys/
 *.log
 .env
+node-state.json

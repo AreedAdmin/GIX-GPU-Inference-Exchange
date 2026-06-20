@@ -25,6 +25,8 @@ export interface JobResult {
   attestPubkey: string;
   /** On-chain submit digest, if the attestation was submitted. */
   submitDigest?: string;
+  /** On-chain settlement digest (settle / resolve_attested), if settled by the node. */
+  settleDigest?: string;
 }
 
 export class NodeStore {

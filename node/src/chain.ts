@@ -73,6 +73,7 @@ export class NodeChain {
   private providerRecordId?: string;
   private stakeId?: string;
   private creditCoinId?: string;
+  private askId?: string;
 
   constructor(
     private readonly cfg: NodeConfig,
@@ -175,19 +176,27 @@ export class NodeChain {
     });
 
     // 4. mint_credits<M>(cap, &mut stake, cfg, &mut market, qty, ctx): Coin<Credit<M>>
-    const credit = tx.moveCall({
-      target: `${this.pkg}::staking::mint_credits`,
-      typeArguments: [this.market.creditType],
-      arguments: [
-        providerCap,
-        stake,
-        tx.object(this.cfgId),
-        tx.object(this.market.id),
-        tx.pure.u64(BigInt(this.cfg.mintScu)),
-      ],
-    });
+    //    OPTIONAL legacy owned-credits path. Default GIX_MINT_SCU=0: skip the up-front
+    //    mint entirely so the full staked capacity is free for post_ask (the two-account
+    //    order book mints against the same capacity_scu and would abort EInsufficientCapacity
+    //    if mint_credits already consumed it). Set GIX_MINT_SCU>0 only for the legacy flow.
+    const toTransfer: Array<ReturnType<TransactionT["moveCall"]>> = [providerCap, stake];
+    if (this.cfg.mintScu > 0) {
+      const credit = tx.moveCall({
+        target: `${this.pkg}::staking::mint_credits`,
+        typeArguments: [this.market.creditType],
+        arguments: [
+          providerCap,
+          stake,
+          tx.object(this.cfgId),
+          tx.object(this.market.id),
+          tx.pure.u64(BigInt(this.cfg.mintScu)),
+        ],
+      });
+      toTransfer.push(credit);
+    }
 
-    tx.transferObjects([providerCap, stake, credit], tx.pure.address(this.providerAddress));
+    tx.transferObjects(toTransfer, tx.pure.address(this.providerAddress));
 
     const res = await this.exec(tx);
     this.assertOk(res, "setup(register+stake+mint)");
@@ -197,6 +206,88 @@ export class NodeChain {
         `record=${this.providerRecordId ?? "(n/a in mock mode)"}`,
     );
     return { digest: res.digest };
+  }
+
+  // ---- post resting Ask (two-account order book, E3) ---------------------
+
+  /**
+   * Publish resting capacity as a shared `Ask<M>` (INTERFACE.md §"Shared-Ask order book").
+   *
+   *   post_ask<M>(cap, &mut stake, cfg, &mut market, qty_scu, price_usdc_per_scu, ctx): ID
+   *
+   * Mints `qty_scu` Credit<M> against free capacity (minted_scu += qty, gated at
+   * capacity_scu), moves them into a NEW shared Ask<M> priced at `price_usdc_per_scu`,
+   * emits CreditsMinted + AskPosted, and shares the Ask. We capture the new Ask id from
+   * the AskPosted event (the Ask is a shared object, not "created" under our sender for
+   * objectChanges-by-owner purposes, so the event is the reliable source).
+   *
+   * Requires the owned ProviderCap + ProviderStake captured at setup(). Provider-signed.
+   * Returns the new shared Ask object id (what the consumer's create_job_from_ask targets).
+   */
+  async postAsk(qtyScu: number, priceUsdcPerScu: number): Promise<{ askId: string; digest: string }> {
+    await this.connect();
+    if (!this.providerCapId || !this.stakeId) {
+      throw new Error("postAsk: no ProviderCap/ProviderStake captured (call setup() first)");
+    }
+    const tx = new this.Transaction();
+    tx.moveCall({
+      target: `${this.pkg}::staking::post_ask`,
+      typeArguments: [this.market.creditType],
+      arguments: [
+        tx.object(this.providerCapId),
+        tx.object(this.stakeId),
+        tx.object(this.cfgId),
+        tx.object(this.market.id),
+        tx.pure.u64(BigInt(qtyScu)),
+        tx.pure.u64(BigInt(priceUsdcPerScu)),
+      ],
+    });
+    const res = await this.exec(tx);
+    this.assertOk(res, "post_ask");
+
+    let askId: string | undefined;
+    for (const ev of res.events ?? []) {
+      if (ev.type.endsWith("::events::AskPosted")) {
+        const f = (ev.parsedJson ?? {}) as Record<string, unknown>;
+        askId = (f.ask_id as string) ?? undefined;
+      }
+    }
+    if (!askId) {
+      // Fallback: a shared Ask<M> shows up in objectChanges as "created".
+      for (const ch of res.objectChanges ?? []) {
+        if (ch.type === "created" && ch.objectType.includes("::ask::Ask<")) {
+          askId = ch.objectId;
+        }
+      }
+    }
+    if (!askId) {
+      throw new Error(`post_ask: tx ${res.digest} succeeded but no AskPosted/Ask id found`);
+    }
+    this.askId = askId;
+    return { askId, digest: res.digest };
+  }
+
+  /**
+   * Read the resting Ask's `remaining_scu` (decrements on each consumer fill). Used by the
+   * top-up loop to decide when to re-post. Returns undefined if the Ask object is gone or
+   * unreadable. INTERFACE.md: `ask::remaining_scu<M>(&Ask<M>): u64`, mirrored as a field on
+   * the shared object so we can read it straight off the object content.
+   */
+  async getAskRemaining(askId: string): Promise<number | undefined> {
+    await this.connect();
+    try {
+      const obj = await this.client.getObject({ id: askId, options: { showContent: true } });
+      const content = obj.data?.content;
+      if (!content || content.dataType !== "moveObject") return undefined;
+      const fields = (content as unknown as { fields: Record<string, unknown> }).fields;
+      const v = fields?.remaining_scu;
+      if (typeof v === "number") return v;
+      if (typeof v === "string" && /^\d+$/.test(v)) return Number(v);
+      return undefined;
+    } catch (e) {
+      this.log(`[chain] getAskRemaining(${askId}) error: ${(e as Error).message}`);
+      return undefined;
+    }
   }
 
   // ---- Dispatched subscription (poll, harness-event style) ---------------
@@ -274,7 +365,9 @@ export class NodeChain {
    * The provider must ack (Dispatched → Executing) first (the mock path asserts this;
    * the signed path is expected to do the same). We ack then submit in one PTB.
    */
-  async submitSignedAttestation(a: SignedAttestationArgs): Promise<{ digest: string }> {
+  async submitSignedAttestation(
+    a: SignedAttestationArgs,
+  ): Promise<{ digest: string; verdict?: number }> {
     await this.connect();
     const tx = new this.Transaction();
 
@@ -335,7 +428,48 @@ export class NodeChain {
 
     const res = await this.exec(tx);
     this.assertOk(res, `submit_${this.attestMode}_attestation`);
-    return { digest: res.digest };
+    // Capture the recorded verdict from the AttestationSubmitted event so the
+    // caller can route settlement (VALID → settle, else resolve_attested).
+    let verdict: number | undefined;
+    for (const ev of res.events ?? []) {
+      if (ev.type.endsWith("::events::AttestationSubmitted")) {
+        const f = (ev.parsedJson ?? {}) as Record<string, unknown>;
+        verdict = numOf(f, "verdict");
+      }
+    }
+    return { digest: res.digest, verdict };
+  }
+
+  /**
+   * Settle the job after attestation. The stubbed-match design has no separate
+   * settler, so the provider node closes the loop: a VALID verdict advances the
+   * Job to Verified → `settle<M>` pays the provider + burns credits; any other
+   * verdict leaves it Attested → `resolve_attested<M>` refunds (+ slash). Both
+   * require the provider's &mut ProviderStake and the shared Treasury.
+   *   settle<M>(job, market, cfg, stake, treasury, ctx)
+   *   resolve_attested<M>(job, market, cfg, stake, treasury, ctx)
+   */
+  async settleJob(jobId: string, verdict: number | undefined): Promise<{ digest: string; fn: string }> {
+    await this.connect();
+    if (!this.stakeId) {
+      throw new Error("settleJob: no ProviderStake id captured (register/stake first)");
+    }
+    const fn = verdict === 0 ? "settle" : "resolve_attested";
+    const tx = new this.Transaction();
+    tx.moveCall({
+      target: `${this.pkg}::settlement::${fn}`,
+      typeArguments: [this.market.creditType],
+      arguments: [
+        tx.object(jobId),
+        tx.object(this.market.id),
+        tx.object(this.cfgId),
+        tx.object(this.stakeId),
+        tx.object(this.treasuryId()),
+      ],
+    });
+    const res = await this.exec(tx);
+    this.assertOk(res, fn);
+    return { digest: res.digest, fn };
   }
 
   // ---- low-level helpers (harness pattern) -------------------------------
@@ -392,9 +526,17 @@ export class NodeChain {
   private allowlistId(): string {
     return this.extra("allowlistId", "registry::MeasurementAllowlist");
   }
+  private treasuryId(): string {
+    return this.extra("treasuryId", "settlement::Treasury");
+  }
   private modelRecordId(): string {
     if (this.market.modelId) return this.market.modelId;
     return this.extra("modelRecordId", "registry::ModelRecord");
+  }
+
+  /** The provider's tx (payout/slash) address — also the Ask/Job `provider`. */
+  get provider(): string {
+    return this.providerAddress;
   }
 
   /** Exposed for diagnostics/integration. */
@@ -404,6 +546,7 @@ export class NodeChain {
       providerRecordId: this.providerRecordId,
       stakeId: this.stakeId,
       creditCoinId: this.creditCoinId,
+      askId: this.askId,
     };
   }
 }

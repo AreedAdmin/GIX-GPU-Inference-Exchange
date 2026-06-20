@@ -99,10 +99,10 @@ export async function serveJob(
     attestPubkey: deps.attestPubkeyHex,
   };
 
-  // 5. Submit on-chain (skipped in HTTP/Ollama-only mode).
+  // 5. Submit on-chain (skipped in HTTP/Ollama-only mode), then settle.
   if (deps.chain) {
     try {
-      const { digest } = await deps.chain.submitSignedAttestation({
+      const { digest, verdict } = await deps.chain.submitSignedAttestation({
         jobId: job.jobId,
         measurement,
         inputHash: "0x" + recomputedInput,
@@ -113,7 +113,19 @@ export async function serveJob(
         signature,
       });
       result.submitDigest = digest;
-      log(`[serve] job ${job.jobId}: attestation submitted (digest ${digest})`);
+      log(
+        `[serve] job ${job.jobId}: attestation submitted (digest ${digest}, verdict ${verdict ?? "?"})`,
+      );
+
+      // Close the loop: the stubbed-match design has no separate settler, so the
+      // provider node settles. VALID → settle (pays provider); else → resolve_attested.
+      try {
+        const settled = await deps.chain.settleJob(job.jobId, verdict);
+        result.settleDigest = settled.digest;
+        log(`[serve] job ${job.jobId}: ${settled.fn} (digest ${settled.digest})`);
+      } catch (e) {
+        log(`[serve] job ${job.jobId}: settlement FAILED: ${(e as Error).message}`);
+      }
     } catch (e) {
       log(`[serve] job ${job.jobId}: on-chain submit FAILED: ${(e as Error).message}`);
       // Still store the signed result so /result/:jobId is verifiable off-chain.

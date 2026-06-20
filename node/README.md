@@ -50,9 +50,36 @@ GIX_CHAIN_ENABLED=false npm start
 
 Lifecycle on `npm start`:
 1. Load/create keys under `.keys/` (logs the Sui tx address to fund + the attest pubkey).
-2. Probe Ollama, pull `GIX_MODEL` if absent, start the HTTP server.
+2. Probe Ollama, pull `GIX_MODEL` if absent, start the HTTP server (bound `0.0.0.0` by default).
 3. If chain enabled: `register_provider(endpoint, "GB10", attest_pubkey)` + stake
-   (MOCK_USDC) + mint credits, then poll `Dispatched` events and serve each job.
+   (MOCK_USDC), then **`post_ask<M>(qty_scu, price_usdc_per_scu)`** to publish resting
+   capacity as a **shared `Ask<M>`** (the two-account order book), then poll `Dispatched`
+   events and serve each job. The serve loop handles both legacy owned-credit jobs and
+   **Ask-created jobs bought by a DIFFERENT consumer wallet** identically.
+4. Writes `node-state.json` (the Ask id + public endpoint + market/creditType) so an
+   external consumer client (E3) can **discover what to buy and where**, and logs the same
+   in a boxed `RESTING ASK published` banner.
+5. Tops up the Ask (re-posts a fresh shared `Ask<M>`) when consumers draw `remaining_scu`
+   down to/below `GIX_ASK_TOPUP_THRESHOLD_SCU`.
+
+## Two-account flow (external consumer)
+
+The node publishes a **shared `Ask<M>`**; an external consumer wallet buys against it with
+`job::create_job_from_ask<M>` — the consumer never touches any provider-owned object. The
+node advertises the Ask for discovery two ways:
+
+- **`node-state.json`** (path `GIX_NODE_STATE`, default `node/node-state.json`): a small JSON
+  with `{ packageId, configId, clockId, usdcType, marketId, creditType, provider,
+  publicEndpoint, askId, priceUsdcPerScu, askQtyScu, remainingScu }` — everything the
+  consumer needs to build the `create_job_from_ask<M>` PTB and reach `/inputs` + `/result`.
+- a startup **log banner** printing `ask id`, `public endpoint`, `market`, `creditType (M)`,
+  `price/SCU`, and `qty offered`.
+
+The consumer funds `escrow_in ≥ askQtyScu × priceUsdcPerScu`, POSTs its prompt to
+`<publicEndpoint>/inputs` (getting back the `inputHash`), then calls
+`create_job_from_ask<M>(cfg, &market, &mut ask, qty_scu, escrow_in, input_hash, clk)`. The
+node's serve loop reacts to the resulting `Dispatched`, runs Ollama, signs, submits the
+signed attestation, and settles with its **own** `ProviderStake` (`job.provider` = this node).
 
 ## HTTP (§3.1)
 
@@ -76,12 +103,17 @@ and confirm it matches the settled job — a **verifiable result** without trust
 | `GIX_OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama HTTP base |
 | `GIX_MODEL` | `llama3.1:8b` | served model tag |
 | `GIX_GPU_CLASS` | `GB10` | GPU class advertised on register |
-| `GIX_PUBLIC_ENDPOINT` | `http://<host>:<port>` | endpoint recorded on-chain |
-| `GIX_HTTP_HOST` / `GIX_HTTP_PORT` | `127.0.0.1` / `8080` | HTTP bind |
+| `GIX_PUBLIC_ENDPOINT` | `http://127.0.0.1:<port>` | endpoint recorded on-chain + in `node-state.json`. **Set to a LAN IP / tunnel URL** for a remote consumer. |
+| `GIX_HTTP_HOST` / `GIX_HTTP_PORT` | `0.0.0.0` / `8080` | HTTP bind (0.0.0.0 = reachable cross-machine) |
 | `GIX_KEYS_DIR` | `./.keys` | keypair directory (gitignored) |
 | `GIX_MARKET_ID` | first market in deployment | market this node serves |
 | `GIX_MEASUREMENT` | `deployment.mockMeasurement` | runtime_measurement bytes |
-| `GIX_BOND_USDC` / `GIX_CAPACITY_SCU` / `GIX_MINT_SCU` | `1_000_000` / `1000` / `1000` | stake params |
+| `GIX_BOND_USDC` / `GIX_CAPACITY_SCU` / `GIX_MINT_SCU` | `1_000_000` / `1000` / `0` | stake params. `GIX_MINT_SCU` is the OPTIONAL up-front owned-credit mint (default 0 so full capacity is free for asks). |
+| `GIX_ASK_QTY_SCU` | `100` | SCU published per `post_ask` (shared `Ask<M>`) |
+| `GIX_ASK_PRICE_USDC` | `1000` | per-SCU price (USDC base units) quoted on the Ask |
+| `GIX_ASK_TOPUP_THRESHOLD_SCU` | `10` | re-post a fresh Ask when `remaining_scu` ≤ this (0 disables) |
+| `GIX_ASK_TOPUP_POLL_MS` | `15000` | how often to poll the Ask's `remaining_scu` |
+| `GIX_NODE_STATE` | `node/node-state.json` | where the discovery artifact (Ask id + endpoint) is written |
 | `GIX_CHAIN_ENABLED` | `true` | run on-chain register/serve |
 | `GIX_ATTEST_MODE` | `signed` | `signed` (§1 soft-attest) or `mock` (M1 `submit_mock_attestation`) |
 
