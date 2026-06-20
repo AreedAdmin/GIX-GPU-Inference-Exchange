@@ -1,0 +1,30 @@
+{
+  "name": "@gix/harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GIX MVP M1 off-chain test-data streaming harness — streams synthetic order flow through the on-chain gix exchange.",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "gix-stream": "./src/cli.ts"
+  },
+  "scripts": {
+    "stream": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.37.0",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

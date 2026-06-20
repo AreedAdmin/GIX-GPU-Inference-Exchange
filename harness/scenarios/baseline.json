@@ -1,0 +1,25 @@
+{
+  "name": "baseline",
+  "description": "Steady synthetic flow with light fault injection — happy path plus a few slashes.",
+  "orderRatePerSec": 5,
+  "orderCount": 40,
+  "providers": {
+    "count": 3,
+    "bondUsdc": 1000000000,
+    "capacityScu": 10000,
+    "mintCreditsScu": 5000
+  },
+  "consumers": {
+    "count": 5,
+    "budgetUsdc": 500000000
+  },
+  "qtyScu": { "kind": "uniform", "min": 1, "max": 10 },
+  "priceUsdcPerScu": { "kind": "normal", "mean": 2000, "stddev": 400, "min": 500 },
+  "execLatencyMs": { "kind": "normal", "mean": 2000, "stddev": 800, "min": 100, "max": 12000 },
+  "faults": {
+    "skipAttest": 0.05,
+    "lateAttest": 0.08,
+    "wrongOutput": 0.04
+  },
+  "seed": 42
+}

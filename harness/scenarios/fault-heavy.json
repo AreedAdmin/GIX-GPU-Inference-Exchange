@@ -1,0 +1,25 @@
+{
+  "name": "fault-heavy",
+  "description": "High fault-injection rates to exercise every slash path (missing / SLA / invalid).",
+  "orderRatePerSec": 8,
+  "orderCount": 60,
+  "providers": {
+    "count": 4,
+    "bondUsdc": 2000000000,
+    "capacityScu": 20000,
+    "mintCreditsScu": 12000
+  },
+  "consumers": {
+    "count": 6,
+    "budgetUsdc": 1000000000
+  },
+  "qtyScu": { "kind": "uniform", "min": 1, "max": 15 },
+  "priceUsdcPerScu": { "kind": "normal", "mean": 2500, "stddev": 600, "min": 500 },
+  "execLatencyMs": { "kind": "normal", "mean": 3500, "stddev": 2000, "min": 200, "max": 20000 },
+  "faults": {
+    "skipAttest": 0.2,
+    "lateAttest": 0.25,
+    "wrongOutput": 0.15
+  },
+  "seed": 7
+}

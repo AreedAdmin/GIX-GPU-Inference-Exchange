@@ -1,0 +1,25 @@
+{
+  "name": "m1-faults",
+  "description": "Live-chain run with SLA-breach fault injection: most jobs settle, some breach the SLA and produce an on-chain slash+refund via resolve_attested.",
+  "orderRatePerSec": 1000,
+  "orderCount": 8,
+  "providers": {
+    "count": 1,
+    "bondUsdc": 200000000,
+    "capacityScu": 2000,
+    "mintCreditsScu": 1000
+  },
+  "consumers": {
+    "count": 1,
+    "budgetUsdc": 2000000000
+  },
+  "qtyScu": { "kind": "fixed", "value": 2 },
+  "priceUsdcPerScu": { "kind": "fixed", "value": 1000 },
+  "execLatencyMs": { "kind": "fixed", "value": 1000 },
+  "faults": {
+    "skipAttest": 0,
+    "lateAttest": 0.35,
+    "wrongOutput": 0
+  },
+  "seed": 11
+}

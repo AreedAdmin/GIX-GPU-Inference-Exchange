@@ -1,0 +1,25 @@
+{
+  "name": "high-throughput",
+  "description": "Many orders, more providers/consumers, minimal faults — stress the matching + tally.",
+  "orderRatePerSec": 50,
+  "orderCount": 500,
+  "providers": {
+    "count": 10,
+    "bondUsdc": 5000000000,
+    "capacityScu": 100000,
+    "mintCreditsScu": 80000
+  },
+  "consumers": {
+    "count": 20,
+    "budgetUsdc": 2000000000
+  },
+  "qtyScu": { "kind": "uniform", "min": 1, "max": 8 },
+  "priceUsdcPerScu": { "kind": "normal", "mean": 1800, "stddev": 300, "min": 500 },
+  "execLatencyMs": { "kind": "normal", "mean": 1500, "stddev": 500, "min": 100, "max": 8000 },
+  "faults": {
+    "skipAttest": 0.02,
+    "lateAttest": 0.02,
+    "wrongOutput": 0.01
+  },
+  "seed": 99
+}

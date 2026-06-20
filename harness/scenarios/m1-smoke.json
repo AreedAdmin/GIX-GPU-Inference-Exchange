@@ -1,0 +1,25 @@
+{
+  "name": "m1-smoke",
+  "description": "Tiny live-chain bring-up: one provider, one consumer, a handful of orders. No faults — every job should settle.",
+  "orderRatePerSec": 1000,
+  "orderCount": 3,
+  "providers": {
+    "count": 1,
+    "bondUsdc": 100000000,
+    "capacityScu": 1000,
+    "mintCreditsScu": 500
+  },
+  "consumers": {
+    "count": 1,
+    "budgetUsdc": 1000000000
+  },
+  "qtyScu": { "kind": "fixed", "value": 2 },
+  "priceUsdcPerScu": { "kind": "fixed", "value": 1000 },
+  "execLatencyMs": { "kind": "fixed", "value": 1000 },
+  "faults": {
+    "skipAttest": 0,
+    "lateAttest": 0,
+    "wrongOutput": 0
+  },
+  "seed": 7
+}
