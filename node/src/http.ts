@@ -89,6 +89,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: HttpDeps)
       measurement: r.measurement,
       signature: r.signature,
       attestPubkey: r.attestPubkey,
+      // M2: Walrus blob ids (base64url) when uploaded; omitted on localnet / Walrus-disabled.
+      ...(r.outputBlobId ? { outputBlobId: r.outputBlobId } : {}),
+      ...(r.quoteBlobId ? { quoteBlobId: r.quoteBlobId } : {}),
     });
     return;
   }

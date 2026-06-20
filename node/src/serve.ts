@@ -17,6 +17,8 @@ import {
   buildCanonicalMessage,
   sha2_256Hex,
 } from "./attest/canonical.js";
+import { sha2_256BytesHex } from "./walrus.js";
+import type { WalrusIO } from "./walrus.js";
 import type { AttestSigner } from "./attest/signer.js";
 import type { OllamaClient } from "./ollama.js";
 import type { NodeChain, DispatchedJob } from "./chain.js";
@@ -30,7 +32,39 @@ export interface ServeDeps {
   store: NodeStore;
   model: string;
   measurement: string;
+  /** M2: Walrus I/O (testnet). null when disabled (localnet / HTTP-only) ⇒ /inputs cache. */
+  walrus?: WalrusIO | null;
   log: (msg: string) => void;
+}
+
+/** Resolve the prompt for a job: from Walrus by input_blob_id, else the /inputs cache. */
+async function resolvePrompt(
+  job: DispatchedJob,
+  inputBlobId: bigint,
+  deps: ServeDeps,
+): Promise<string | undefined> {
+  const { store, walrus, log } = deps;
+  // M2: if the job committed a Walrus input blob and Walrus is available, read it from there.
+  if (inputBlobId !== 0n && walrus) {
+    try {
+      const bytes = await walrus.readByInt(inputBlobId);
+      const prompt = new TextDecoder().decode(bytes);
+      // The blob id is a storage commitment, not a content hash: verify sha2_256 against
+      // the on-chain input_hash before trusting it.
+      const onChain = job.inputHash.startsWith("0x") ? job.inputHash.slice(2) : job.inputHash;
+      if (sha2_256BytesHex(bytes).toLowerCase() !== onChain.toLowerCase()) {
+        log(`[serve] job ${job.jobId}: Walrus input blob hash != on-chain input_hash — refusing`);
+        return undefined;
+      }
+      log(`[serve] job ${job.jobId}: read prompt from Walrus (blob_id ${inputBlobId})`);
+      // Cache it so /result and any retry are fast.
+      store.putPrompt(onChain, prompt);
+      return prompt;
+    } catch (e) {
+      log(`[serve] job ${job.jobId}: Walrus read failed (${(e as Error).message}); trying /inputs cache`);
+    }
+  }
+  return store.getPrompt(job.inputHash);
 }
 
 /**
@@ -42,13 +76,25 @@ export async function serveJob(
   job: DispatchedJob,
   deps: ServeDeps,
 ): Promise<JobResult | null> {
-  const { ollama, attest, store, model, measurement, log } = deps;
+  const { ollama, attest, store, model, measurement, walrus, log } = deps;
 
-  const prompt = store.getPrompt(job.inputHash);
+  // M2: read the job's kind (escrow vs fill) + its Walrus input commitment. This drives
+  // both where we fetch the prompt and which settlement path we take. On localnet / when
+  // the chain is disabled, this defaults to {isFill:false, inputBlobId:0} and the flow is
+  // identical to M1 (prompt from /inputs cache, settle via settle/resolve_attested).
+  let isFill = false;
+  let inputBlobId = 0n;
+  if (deps.chain) {
+    const meta = await deps.chain.getJobMeta(job.jobId);
+    isFill = meta.isFill;
+    inputBlobId = meta.inputBlobId;
+  }
+
+  const prompt = await resolvePrompt(job, inputBlobId, deps);
   if (prompt === undefined) {
     log(
-      `[serve] job ${job.jobId}: no cached prompt for input_hash ${job.inputHash} ` +
-        `(consumer must POST /inputs first) — skipping`,
+      `[serve] job ${job.jobId}: no prompt available for input_hash ${job.inputHash} ` +
+        `(consumer must POST /inputs or upload the Walrus input blob first) — skipping`,
     );
     return null;
   }
@@ -99,6 +145,45 @@ export async function serveJob(
     attestPubkey: deps.attestPubkeyHex,
   };
 
+  // 4b. M2 — Walrus upload (testnet). Upload the completion + the signed attestation quote
+  // as permanent blobs; their u256 blob ids ride along into submit_signed_attestation as
+  // COMMITMENTS (the sha2_256 hashes remain the verification primitive). Best-effort: if the
+  // upload fails we still submit (with blob_id 0) and store the result off-chain.
+  let outputBlobId = 0n;
+  let quoteBlobId = 0n;
+  if (walrus) {
+    try {
+      const out = await walrus.uploadUtf8(gen.completion, {
+        gix: "output",
+        job: job.jobId,
+        output_hash: outputHashHex,
+      });
+      outputBlobId = out.blobIdInt;
+      result.outputBlobId = out.blobId;
+      // The "quote" blob: the canonical signed attestation envelope (verifiable off-chain).
+      const quote = JSON.stringify({
+        jobId: job.jobId,
+        measurement,
+        inputHash: "0x" + recomputedInput,
+        outputHash: "0x" + outputHashHex,
+        outputTokenCount: gen.outputTokenCount,
+        tStart: gen.tStart,
+        tEnd: gen.tEnd,
+        signature: signatureHex,
+        attestPubkey: deps.attestPubkeyHex,
+        message: "0x" + message.toString("hex"),
+      });
+      const q = await walrus.uploadUtf8(quote, { gix: "quote", job: job.jobId });
+      quoteBlobId = q.blobIdInt;
+      result.quoteBlobId = q.blobId;
+      log(
+        `[serve] job ${job.jobId}: Walrus uploaded output (blob ${out.blobId}) + quote (blob ${q.blobId})`,
+      );
+    } catch (e) {
+      log(`[serve] job ${job.jobId}: Walrus upload FAILED: ${(e as Error).message} (submitting without blob ids)`);
+    }
+  }
+
   // 5. Submit on-chain (skipped in HTTP/Ollama-only mode), then settle.
   if (deps.chain) {
     try {
@@ -111,16 +196,19 @@ export async function serveJob(
         tStart: gen.tStart,
         tEnd: gen.tEnd,
         signature,
+        outputBlobId,
+        quoteBlobId,
       });
       result.submitDigest = digest;
       log(
         `[serve] job ${job.jobId}: attestation submitted (digest ${digest}, verdict ${verdict ?? "?"})`,
       );
 
-      // Close the loop: the stubbed-match design has no separate settler, so the
-      // provider node settles. VALID → settle (pays provider); else → resolve_attested.
+      // Close the loop: the provider node settles. Branch on the JOB KIND (M2):
+      //   escrow job → settle / resolve_attested
+      //   fill job   → settle_fill / resolve_fill (the contract rejects the old settle here)
       try {
-        const settled = await deps.chain.settleJob(job.jobId, verdict);
+        const settled = await deps.chain.settleJob(job.jobId, verdict, isFill);
         result.settleDigest = settled.digest;
         log(`[serve] job ${job.jobId}: ${settled.fn} (digest ${settled.digest})`);
       } catch (e) {

@@ -44,6 +44,18 @@ export interface NodeState {
   remainingScu?: number;
   /** ISO timestamp this file was last written. */
   updatedAt: string;
+
+  // ---- M2 (testnet DeepBook path) -------------------------------------------
+  /** Which rail this node posts liquidity on: "ask" (gix Ask, localnet) or "deepbook" (testnet). */
+  mode?: "ask" | "deepbook";
+  /** The bound DeepBook Pool<Credit<M>,USDC> id the consumer swaps on (testnet). */
+  deepbookPoolId?: string;
+  /** The resting DeepBook ask order id this node placed (testnet). */
+  deepbookOrderId?: string;
+  /** The node's DeepBook BalanceManager id (testnet). */
+  balanceManagerId?: string;
+  /** Whether the node uses Walrus for job I/O (so the consumer can upload inputs there). */
+  walrus?: boolean;
 }
 
 /** Atomically write node-state.json (the consumer polls/reads this to discover the Ask). */

@@ -11,6 +11,7 @@
     "gix-node": "./src/main.ts"
   },
   "scripts": {
+    "build": "tsc",
     "start": "tsx src/main.ts",
     "ollama-check": "tsx src/cli/ollama-check.ts",
     "test": "vitest run",
@@ -18,7 +19,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@mysten/sui": "^1.37.0",
+    "@mysten/deepbook-v3": "^1.5.1",
+    "@mysten/sui": "^2.19.0",
+    "@mysten/walrus": "^1.2.1",
+    "@mysten/walrus-wasm": "^0.3.0",
     "@noble/ed25519": "^2.1.0"
   },
   "devDependencies": {

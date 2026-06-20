@@ -29,9 +29,7 @@ import type { Keypair } from "@mysten/sui/cryptography";
 import type { NodeConfig, MarketDeployment } from "./config.js";
 import { marketOf } from "./config.js";
 import { hexToBytes } from "./attest/canonical.js";
-
-type SuiClientT = import("@mysten/sui/client").SuiClient;
-type TransactionT = import("@mysten/sui/transactions").Transaction;
+import type { SuiClientT, TransactionT } from "./txtypes.js";
 
 /** A job to serve, distilled from a Dispatched event. */
 export interface DispatchedJob {
@@ -52,6 +50,18 @@ export interface SignedAttestationArgs {
   tStart: number;
   tEnd: number;
   signature: Uint8Array; // 64B
+  /** M2: Walrus output (completion) blob commitment as u256; 0 = none. */
+  outputBlobId?: bigint;
+  /** M2: Walrus attestation-quote blob commitment as u256; 0 = none. */
+  quoteBlobId?: bigint;
+}
+
+/** M2: a job's kind + Walrus input commitment, read off the shared Job object. */
+export interface JobMeta {
+  /** true ⇒ created via create_job_from_fill (no escrow; settle via settle_fill/resolve_fill). */
+  isFill: boolean;
+  /** Walrus input (prompt) blob commitment as u256; 0n = none (use /inputs cache). */
+  inputBlobId: bigint;
 }
 
 type AttestMode = "signed" | "mock";
@@ -67,6 +77,8 @@ export class NodeChain {
   private readonly clockId: string;
   private readonly market: MarketDeployment;
   private readonly attestMode: AttestMode;
+  private readonly network: NodeConfig["network"];
+  private readonly m2Abi: boolean;
 
   // Captured at setup, mirrors the harness SuiChain bookkeeping.
   private providerCapId?: string;
@@ -87,15 +99,20 @@ export class NodeChain {
     this.clockId = cfg.deployment.clockId;
     this.market = marketOf(cfg);
     this.attestMode = (process.env.GIX_ATTEST_MODE as AttestMode) ?? "signed";
+    this.network = cfg.network;
+    this.m2Abi = cfg.m2Abi;
   }
 
   // ---- connection (lazy, harness pattern) -------------------------------
 
   private async connect(): Promise<void> {
     if (this.connected) return;
-    const { SuiClient, getFullnodeUrl } = await import("@mysten/sui/client");
+    const { SuiJsonRpcClient, getJsonRpcFullnodeUrl } = await import("@mysten/sui/jsonRpc");
     const { Transaction } = await import("@mysten/sui/transactions");
-    this.client = new SuiClient({ url: this.cfg.rpcUrl ?? getFullnodeUrl("localnet") });
+    this.client = new SuiJsonRpcClient({
+      network: this.network,
+      url: this.cfg.rpcUrl ?? getJsonRpcFullnodeUrl(this.network),
+    });
     this.Transaction = Transaction as unknown as new () => TransactionT;
     this.connected = true;
     // Fail fast with a clear message if the RPC is unreachable.
@@ -290,6 +307,74 @@ export class NodeChain {
     }
   }
 
+  // ---- M2: mint owned credits (for the DeepBook deposit) -----------------
+
+  /**
+   * Mint `qtyScu` Credit<M> against free staked capacity into THIS node's wallet, so the
+   * DeepBook maker can deposit them into its BalanceManager. Uses the same accounting as
+   * the legacy owned-credits path (minted_scu += qty, gated at capacity_scu; emits
+   * CreditsMinted). Distinct from post_ask (which moves credits into a shared gix Ask) —
+   * on testnet we sell via DeepBook instead, so we keep the Coin owned and hand it to the
+   * BalanceManager. Requires the ProviderCap + ProviderStake captured at setup().
+   *
+   *   mint_credits<M>(cap, &mut stake, cfg, &mut market, qty, ctx): Coin<Credit<M>>
+   */
+  async mintCredits(qtyScu: number | bigint): Promise<{ digest: string; creditCoinId?: string }> {
+    await this.connect();
+    if (!this.providerCapId || !this.stakeId) {
+      throw new Error("mintCredits: no ProviderCap/ProviderStake captured (call setup() first)");
+    }
+    const tx = new this.Transaction();
+    const credit = tx.moveCall({
+      target: `${this.pkg}::staking::mint_credits`,
+      typeArguments: [this.market.creditType],
+      arguments: [
+        tx.object(this.providerCapId),
+        tx.object(this.stakeId),
+        tx.object(this.cfgId),
+        tx.object(this.market.id),
+        tx.pure.u64(BigInt(qtyScu)),
+      ],
+    });
+    tx.transferObjects([credit], tx.pure.address(this.providerAddress));
+    const res = await this.exec(tx);
+    this.assertOk(res, "mint_credits");
+    let creditCoinId: string | undefined;
+    for (const ch of res.objectChanges ?? []) {
+      if (ch.type === "created" && ch.objectType.includes("::credit::Credit<")) {
+        creditCoinId = ch.objectId;
+      }
+    }
+    if (creditCoinId) this.creditCoinId = creditCoinId;
+    this.log(`[chain] minted ${qtyScu} SCU Credit -> coin ${creditCoinId ?? "?"} (digest ${res.digest})`);
+    return { digest: res.digest, creditCoinId };
+  }
+
+  // ---- M2: read a job's kind + Walrus input commitment -------------------
+
+  /**
+   * Read the shared Job<M> to determine its kind (escrow vs fill) and its Walrus input
+   * blob commitment. Fill-jobs (create_job_from_fill) MUST settle via settle_fill /
+   * resolve_fill (the contract rejects the old settle/resolve_attested on them), and the
+   * input prompt may need to be fetched from Walrus (input_blob_id != 0) rather than the
+   * /inputs cache. Falls back to {isFill:false, inputBlobId:0n} if the read is ambiguous.
+   */
+  async getJobMeta(jobId: string): Promise<JobMeta> {
+    await this.connect();
+    try {
+      const obj = await this.client.getObject({ id: jobId, options: { showContent: true } });
+      const content = obj.data?.content;
+      if (!content || content.dataType !== "moveObject") return { isFill: false, inputBlobId: 0n };
+      const fields = (content as unknown as { fields: Record<string, unknown> }).fields;
+      const isFill = boolOf(fields, "is_fill");
+      const inputBlobId = u256Of(fields, "input_blob_id");
+      return { isFill, inputBlobId };
+    } catch (e) {
+      this.log(`[chain] getJobMeta(${jobId}) error: ${(e as Error).message}`);
+      return { isFill: false, inputBlobId: 0n };
+    }
+  }
+
   // ---- Dispatched subscription (poll, harness-event style) ---------------
 
   /**
@@ -299,7 +384,7 @@ export class NodeChain {
    */
   subscribeDispatched(onJob: (job: DispatchedJob) => void): () => void {
     let stopped = false;
-    let cursor: import("@mysten/sui/client").EventId | null | undefined = undefined;
+    let cursor: import("@mysten/sui/jsonRpc").EventId | null | undefined = undefined;
     const eventType = `${this.pkg}::events::Dispatched`;
 
     const tick = async (): Promise<void> => {
@@ -384,25 +469,34 @@ export class NodeChain {
             "needs the soft-attestation contract that shares a ProviderRecord)",
         );
       }
+      // M2: submit_signed_attestation gained output_blob_id + quote_blob_id (u256 Walrus
+      // commitments) inserted after `signature`, before `clk`. They are NOT part of the
+      // signed canonical message (the byte layout is unchanged), so the signature stays
+      // valid. Pass 0 when no Walrus blob applies. Gated by m2Abi: the running localnet M1
+      // contract does NOT have these args, so we omit them there (don't break the qwen demo).
+      const sigArgs = [
+        tx.object(a.jobId),
+        tx.object(this.cfgId),
+        tx.object(this.market.id),
+        tx.object(this.modelRecordId()),
+        tx.object(this.allowlistId()),
+        tx.object(this.providerRecordId),
+        tx.pure.vector("u8", strBytes(a.measurement)),
+        tx.pure.vector("u8", Array.from(hexToBytes(a.inputHash))),
+        tx.pure.vector("u8", Array.from(hexToBytes(a.outputHash))),
+        tx.pure.u64(BigInt(a.outputTokenCount)),
+        tx.pure.u64(BigInt(a.tStart)),
+        tx.pure.u64(BigInt(a.tEnd)),
+        tx.pure.vector("u8", Array.from(a.signature)),
+      ];
+      if (this.m2Abi) {
+        sigArgs.push(tx.pure.u256(a.outputBlobId ?? 0n), tx.pure.u256(a.quoteBlobId ?? 0n));
+      }
+      sigArgs.push(tx.object(this.clockId));
       tx.moveCall({
         target: `${this.pkg}::attestation::submit_signed_attestation`,
         typeArguments: [this.market.creditType],
-        arguments: [
-          tx.object(a.jobId),
-          tx.object(this.cfgId),
-          tx.object(this.market.id),
-          tx.object(this.modelRecordId()),
-          tx.object(this.allowlistId()),
-          tx.object(this.providerRecordId),
-          tx.pure.vector("u8", strBytes(a.measurement)),
-          tx.pure.vector("u8", Array.from(hexToBytes(a.inputHash))),
-          tx.pure.vector("u8", Array.from(hexToBytes(a.outputHash))),
-          tx.pure.u64(BigInt(a.outputTokenCount)),
-          tx.pure.u64(BigInt(a.tStart)),
-          tx.pure.u64(BigInt(a.tEnd)),
-          tx.pure.vector("u8", Array.from(a.signature)),
-          tx.object(this.clockId),
-        ],
+        arguments: sigArgs,
       });
     } else {
       // Mock fallback: submit_mock_attestation (no input_hash, no signature, no
@@ -441,32 +535,65 @@ export class NodeChain {
   }
 
   /**
-   * Settle the job after attestation. The stubbed-match design has no separate
-   * settler, so the provider node closes the loop: a VALID verdict advances the
-   * Job to Verified → `settle<M>` pays the provider + burns credits; any other
-   * verdict leaves it Attested → `resolve_attested<M>` refunds (+ slash). Both
-   * require the provider's &mut ProviderStake and the shared Treasury.
-   *   settle<M>(job, market, cfg, stake, treasury, ctx)
-   *   resolve_attested<M>(job, market, cfg, stake, treasury, ctx)
+   * Settle the job after attestation. The stubbed-match design has no separate settler, so
+   * the provider node closes the loop. Branches on the JOB KIND (M2):
+   *
+   * ESCROW jobs (create_job / create_job_from_ask):
+   *   VALID  → settle<M>(job, market, cfg, stake, treasury)         — pay provider + burn
+   *   else   → resolve_attested<M>(job, market, cfg, stake, treasury) — refund + slash
+   *
+   * FILL jobs (create_job_from_fill, M2 / Option B — no escrow; provider paid at the match):
+   *   VALID  → settle_fill<M>(job, market, cfg, stake)              — burn credit only (no
+   *            treasury arg, no USDC moved)
+   *   else   → resolve_fill<M>(job, market, cfg, stake, treasury)    — refund-from-slash
+   *
+   * The contract REJECTS the old settle/resolve_attested on a fill-job (EWrongJobKind=409),
+   * so we read the kind first (or accept it injected to save a read). `isFill` defaults to
+   * false (the legacy escrow path) so localnet behaviour is unchanged.
    */
-  async settleJob(jobId: string, verdict: number | undefined): Promise<{ digest: string; fn: string }> {
+  async settleJob(
+    jobId: string,
+    verdict: number | undefined,
+    isFill = false,
+  ): Promise<{ digest: string; fn: string }> {
     await this.connect();
     if (!this.stakeId) {
       throw new Error("settleJob: no ProviderStake id captured (register/stake first)");
     }
-    const fn = verdict === 0 ? "settle" : "resolve_attested";
+    const ok = verdict === 0;
     const tx = new this.Transaction();
-    tx.moveCall({
-      target: `${this.pkg}::settlement::${fn}`,
-      typeArguments: [this.market.creditType],
-      arguments: [
+    let fn: string;
+    if (isFill) {
+      // FILL jobs route to settle_fill / resolve_fill.
+      fn = ok ? "settle_fill" : "resolve_fill";
+      const args = [
         tx.object(jobId),
         tx.object(this.market.id),
         tx.object(this.cfgId),
         tx.object(this.stakeId),
-        tx.object(this.treasuryId()),
-      ],
-    });
+      ];
+      // settle_fill has NO treasury arg (no fee leg); resolve_fill does (slash remainder).
+      if (!ok) args.push(tx.object(this.treasuryId()));
+      tx.moveCall({
+        target: `${this.pkg}::settlement::${fn}`,
+        typeArguments: [this.market.creditType],
+        arguments: args,
+      });
+    } else {
+      // ESCROW jobs route to settle / resolve_attested (both take treasury).
+      fn = ok ? "settle" : "resolve_attested";
+      tx.moveCall({
+        target: `${this.pkg}::settlement::${fn}`,
+        typeArguments: [this.market.creditType],
+        arguments: [
+          tx.object(jobId),
+          tx.object(this.market.id),
+          tx.object(this.cfgId),
+          tx.object(this.stakeId),
+          tx.object(this.treasuryId()),
+        ],
+      });
+    }
     const res = await this.exec(tx);
     this.assertOk(res, fn);
     return { digest: res.digest, fn };
@@ -571,6 +698,22 @@ function numOf(f: Record<string, unknown>, k: string): number {
   if (typeof v === "number") return v;
   if (typeof v === "string" && /^\d+$/.test(v)) return Number(v);
   return 0;
+}
+
+function boolOf(f: Record<string, unknown>, k: string): boolean {
+  const v = f[k];
+  if (typeof v === "boolean") return v;
+  if (typeof v === "string") return v === "true";
+  return false;
+}
+
+/** Read a u256 move field (returned by RPC as a decimal string) as a bigint. 0n if absent. */
+function u256Of(f: Record<string, unknown>, k: string): bigint {
+  const v = f[k];
+  if (typeof v === "bigint") return v;
+  if (typeof v === "number") return BigInt(v);
+  if (typeof v === "string" && /^\d+$/.test(v)) return BigInt(v);
+  return 0n;
 }
 
 function sleep(ms: number): Promise<void> {

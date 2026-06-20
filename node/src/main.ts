@@ -13,12 +13,14 @@
  * Robust to Ollama/RPC unavailability with clear, actionable errors.
  */
 
-import { loadConfig, marketOf } from "./config.js";
+import { loadConfig, marketOf, deepbookPoolIdOf } from "./config.js";
 import { loadKeys } from "./keys.js";
 import { OllamaClient, OllamaError } from "./ollama.js";
 import { NodeStore } from "./store.js";
 import { createHttpServer } from "./http.js";
 import { NodeChain } from "./chain.js";
+import { DeepBookMaker } from "./deepbook.js";
+import { WalrusIO } from "./walrus.js";
 import { serveJob, type ServeDeps } from "./serve.js";
 import { writeNodeState, type NodeState } from "./state.js";
 
@@ -78,9 +80,14 @@ async function main(): Promise<void> {
     }
   }
 
-  // 4. Chain: register + stake + post Ask + serve loop.
+  const market = marketOf(cfg);
+  const deepbookPoolId = deepbookPoolIdOf(market);
+
+  // 4. Chain: register + stake + post liquidity (DeepBook ask OR gix Ask) + serve loop.
   let chain: NodeChain | null = null;
-  let askId: string | undefined;
+  let askId: string | undefined; // gix shared Ask id (localnet path)
+  let deepbook: DeepBookMaker | null = null;
+  let deepbookOrderId: string | undefined; // DeepBook resting ask order id (testnet path)
   if (cfg.chainEnabled) {
     chain = new NodeChain(cfg, keys.suiKeypair, keys.suiAddress, log);
     try {
@@ -90,16 +97,52 @@ async function main(): Promise<void> {
       const { digest } = await chain.setup(keys.attestPubkeyHex);
       log(`[node] registration+stake${cfg.mintScu > 0 ? `+mint(${cfg.mintScu})` : ""} done (digest ${digest})`);
 
-      // Publish resting capacity as a shared Ask<M> for the two-account flow (E3). This is
-      // what an EXTERNAL consumer wallet fills via job::create_job_from_ask<M>.
-      try {
-        log(`[node] posting Ask: qty=${cfg.askQtyScu} SCU @ ${cfg.askPriceUsdc} USDC/SCU on market ${cfg.marketId}`);
-        const posted = await chain.postAsk(cfg.askQtyScu, cfg.askPriceUsdc);
-        askId = posted.askId;
-        log(`[node] Ask posted (digest ${posted.digest})`);
-      } catch (e) {
-        log(`[node] WARNING: post_ask failed: ${(e as Error).message}`);
-        log(`[node] continuing (legacy serve loop still works; no resting Ask published)`);
+      if (cfg.deepbookEnabled && deepbookPoolId) {
+        // ---- M2 TESTNET path: post a resting limit ASK on DeepBook ----------------------
+        // Provider mints owned Credit<M>, deposits it into a BalanceManager, and places an
+        // ask (sell Credit for USDC) on the market's bound pool. A consumer's USDC→Credit
+        // swap pays this maker AT THE FILL; the consumer then feeds the credits into
+        // create_job_from_fill in the same PTB. Replaces post_ask on testnet.
+        try {
+          log(`[node] DeepBook maker: pool=${deepbookPoolId} qty=${cfg.askQtyScu} SCU @ ${cfg.askPriceUsdc} (raw price)`);
+          deepbook = new DeepBookMaker({
+            network: cfg.network === "mainnet" ? "mainnet" : "testnet",
+            rpcUrl: cfg.rpcUrl,
+            signer: keys.suiKeypair,
+            address: keys.suiAddress,
+            creditCoinType: market.creditCoinType ?? market.creditType,
+            usdcType: cfg.deployment.usdcType,
+            poolId: deepbookPoolId,
+            inputTokenFees: cfg.deepbookInputTokenFees,
+            log,
+          });
+          await deepbook.ensureBalanceManager();
+          // Mint owned Credit<M> for the deposit (separate gix PTB), then deposit + place ask.
+          await chain.mintCredits(cfg.askQtyScu);
+          await deepbook.depositCredits(cfg.askQtyScu);
+          const placed = await deepbook.placeAsk(cfg.askQtyScu, cfg.askPriceUsdc);
+          deepbookOrderId = placed.orderId;
+          log(`[node] DeepBook ASK placed (order ${deepbookOrderId ?? "?"}, digest ${placed.digest})`);
+        } catch (e) {
+          log(`[node] WARNING: DeepBook maker setup failed: ${(e as Error).message}`);
+          log(`[node] continuing (serve loop still works for jobs created elsewhere)`);
+          deepbook = null;
+        }
+      } else {
+        // ---- LOCALNET path: publish a resting shared gix Ask<M> (two-account flow, E3) ---
+        if (cfg.deepbookEnabled && !deepbookPoolId) {
+          log(`[node] DeepBook requested but market.deepbookPoolId is UNSET — falling back to gix Ask. ` +
+            `Bind a pool via market::set_deepbook_pool_id and set deployment.markets[].deepbookPoolId.`);
+        }
+        try {
+          log(`[node] posting gix Ask: qty=${cfg.askQtyScu} SCU @ ${cfg.askPriceUsdc} USDC/SCU on market ${cfg.marketId}`);
+          const posted = await chain.postAsk(cfg.askQtyScu, cfg.askPriceUsdc);
+          askId = posted.askId;
+          log(`[node] gix Ask posted (digest ${posted.digest})`);
+        } catch (e) {
+          log(`[node] WARNING: post_ask failed: ${(e as Error).message}`);
+          log(`[node] continuing (legacy serve loop still works; no resting Ask published)`);
+        }
       }
     } catch (e) {
       log(`[node] WARNING: on-chain setup failed: ${(e as Error).message}`);
@@ -110,8 +153,27 @@ async function main(): Promise<void> {
     log(`[node] GIX_CHAIN_ENABLED=false — running HTTP + Ollama only (no on-chain register/serve)`);
   }
 
-  // Write the discovery artifact (node-state.json) the consumer (E3) reads to find the Ask.
-  const market = marketOf(cfg);
+  // M2: Walrus I/O (testnet). Built once and shared by the serve loop for output upload +
+  // input read. null on localnet / when disabled ⇒ serve uses the /inputs cache.
+  let walrus: WalrusIO | null = null;
+  if (cfg.walrusEnabled && (cfg.network === "testnet" || cfg.network === "mainnet")) {
+    walrus = new WalrusIO({
+      network: cfg.network,
+      rpcUrl: cfg.rpcUrl,
+      signer: keys.suiKeypair,
+      epochs: cfg.walrusEpochs,
+      wasmUrl: cfg.walrusWasmUrl,
+      log,
+    });
+    log(`[node] Walrus I/O enabled (network=${cfg.network}, retain ${cfg.walrusEpochs} epochs). ` +
+      `Tx address must hold WAL (+ SUI gas).`);
+  } else if (cfg.walrusEnabled) {
+    log(`[node] WARNING: GIX_WALRUS set but network=${cfg.network} is not testnet/mainnet — Walrus disabled.`);
+  }
+
+  // Write the discovery artifact (node-state.json). On localnet the consumer (E3) reads
+  // askId + fills via create_job_from_ask; on testnet it reads the DeepBook pool + makerType
+  // and fills via the DeepBook swap → create_job_from_fill PTB.
   const persistState = (remainingScu?: number): void => {
     const state: NodeState = {
       network: cfg.deployment.network,
@@ -128,6 +190,12 @@ async function main(): Promise<void> {
       askQtyScu: cfg.askQtyScu,
       remainingScu,
       updatedAt: "", // filled by writeNodeState
+      // M2 fields (present on the testnet DeepBook path).
+      mode: deepbook ? "deepbook" : "ask",
+      deepbookPoolId: deepbookPoolId,
+      deepbookOrderId,
+      balanceManagerId: deepbook?.managerId,
+      walrus: cfg.walrusEnabled,
     };
     try {
       writeNodeState(cfg.nodeStatePath, state);
@@ -135,8 +203,21 @@ async function main(): Promise<void> {
       log(`[node] WARNING: could not write node-state.json at ${cfg.nodeStatePath}: ${(e as Error).message}`);
     }
   };
-  persistState(askId ? cfg.askQtyScu : undefined);
-  if (askId) {
+  persistState(askId || deepbookOrderId ? cfg.askQtyScu : undefined);
+  if (deepbook && deepbookPoolId) {
+    log(`[node] ===========================================================================`);
+    log(`[node]  DeepBook resting ASK placed — consumer can now buy (swap → create_job_from_fill):`);
+    log(`[node]    deepbook pool    = ${deepbookPoolId}`);
+    log(`[node]    order id         = ${deepbookOrderId ?? "(read from book)"}`);
+    log(`[node]    balance manager  = ${deepbook.managerId}`);
+    log(`[node]    public endpoint  = ${cfg.publicEndpoint}`);
+    log(`[node]    market           = ${cfg.marketId}`);
+    log(`[node]    creditType (M)   = ${market.creditType}`);
+    log(`[node]    price (raw)      = ${cfg.askPriceUsdc}`);
+    log(`[node]    qty offered      = ${cfg.askQtyScu} SCU`);
+    log(`[node]    discovery file   = ${cfg.nodeStatePath}`);
+    log(`[node] ===========================================================================`);
+  } else if (askId) {
     log(`[node] ===========================================================================`);
     log(`[node]  RESTING ASK published — consumer can now buy:`);
     log(`[node]    ask id           = ${askId}`);
@@ -157,6 +238,7 @@ async function main(): Promise<void> {
     store,
     model: cfg.model,
     measurement: cfg.measurement,
+    walrus,
     log,
   };
 
@@ -179,12 +261,10 @@ async function main(): Promise<void> {
     log(`[node] no chain serve loop; submit prompts via POST /inputs and drive jobs externally`);
   }
 
-  // 6. Ask top-up loop — when consumers draw the resting Ask's remaining_scu down to/below
-  //    the threshold, re-post a fresh Ask so liquidity never runs dry mid-demo. The fresh
-  //    Ask is a NEW shared object (new id); node-state.json is rewritten with the new id so
-  //    the consumer always discovers a live Ask. Disabled by GIX_ASK_TOPUP_THRESHOLD_SCU=0.
+  // 6a. gix Ask top-up loop (localnet) — re-post a fresh Ask when remaining_scu runs low.
+  //     Disabled by GIX_ASK_TOPUP_THRESHOLD_SCU=0.
   let topupStopped = false;
-  if (chain && askId && cfg.askTopupThresholdScu > 0) {
+  if (chain && askId && !deepbook && cfg.askTopupThresholdScu > 0) {
     const topupLoop = async (): Promise<void> => {
       while (!topupStopped) {
         await sleep(cfg.askTopupPollMs);
@@ -210,11 +290,48 @@ async function main(): Promise<void> {
     void topupLoop();
   }
 
+  // 6b. DeepBook ask refresh loop (testnet) — when the resting base runs low (consumers
+  //     filled the ask), mint+deposit+re-place a fresh ask so liquidity never runs dry.
+  //     Disabled by GIX_DEEPBOOK_REFRESH_THRESHOLD_SCU=0.
+  if (chain && deepbook && cfg.deepbookRefreshThresholdScu > 0) {
+    const refreshLoop = async (): Promise<void> => {
+      while (!topupStopped) {
+        await sleep(cfg.deepbookPollMs);
+        if (topupStopped || !chain || !deepbook) continue;
+        const remaining = await deepbook.getRestingBaseScu();
+        if (remaining === undefined) continue;
+        if (remaining > cfg.deepbookRefreshThresholdScu) {
+          persistState(remaining);
+          continue;
+        }
+        log(`[node] DeepBook ask remaining=${remaining} ≤ threshold ${cfg.deepbookRefreshThresholdScu} — re-placing`);
+        try {
+          await chain.mintCredits(cfg.askQtyScu);
+          await deepbook.depositCredits(cfg.askQtyScu);
+          const placed = await deepbook.placeAsk(cfg.askQtyScu, cfg.askPriceUsdc);
+          deepbookOrderId = placed.orderId;
+          persistState(cfg.askQtyScu);
+          log(`[node] DeepBook ask refreshed: order ${deepbookOrderId ?? "?"} (digest ${placed.digest})`);
+        } catch (e) {
+          log(`[node] WARNING: DeepBook refresh failed: ${(e as Error).message} ` +
+            `(capacity/credit may be exhausted; raise GIX_CAPACITY_SCU)`);
+        }
+      }
+    };
+    void refreshLoop();
+  }
+
   // Graceful shutdown.
   const shutdown = (): void => {
     log(`[node] shutting down`);
     topupStopped = true;
     stop?.();
+    // Best-effort: cancel resting DeepBook orders so capacity isn't stranded on chain.
+    if (deepbook) {
+      void deepbook.cancelAllAsks().catch((e) =>
+        log(`[node] DeepBook cancelAllAsks on shutdown failed: ${(e as Error).message}`),
+      );
+    }
     server.close();
     process.exit(0);
   };

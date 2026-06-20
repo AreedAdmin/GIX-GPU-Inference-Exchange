@@ -25,8 +25,12 @@ export interface JobResult {
   attestPubkey: string;
   /** On-chain submit digest, if the attestation was submitted. */
   submitDigest?: string;
-  /** On-chain settlement digest (settle / resolve_attested), if settled by the node. */
+  /** On-chain settlement digest (settle / resolve_attested / settle_fill / resolve_fill). */
   settleDigest?: string;
+  /** M2: Walrus output (completion) blob id (base64url string), if uploaded. */
+  outputBlobId?: string;
+  /** M2: Walrus attestation-quote blob id (base64url string), if uploaded. */
+  quoteBlobId?: string;
 }
 
 export class NodeStore {
