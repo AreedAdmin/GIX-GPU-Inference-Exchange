@@ -4,7 +4,7 @@ import { hexToBytes, sha2_256Hex } from "../src/hash.js";
 import type { MarketDeployment } from "../src/types.js";
 
 /**
- * Assert the M2 testnet buy-path PTB plan against contracts/INTERFACE.md §"M2 —
+ * Assert the M2 testnet buy-path PTB plan against contracts/README.md §"M2 —
  * DeepBook fill jobs" and the exact PTB in m2-phase0-design.md:
  *
  *   1) deepbook::pool::swap_exact_quote_for_base<Credit<M>, MOCK_USDC>(
@@ -29,7 +29,7 @@ const market: MarketDeployment = {
   deepbookPoolId: "0xPOOL",
 };
 
-describe("buildFillJobPlan — ABI conformance (contracts/INTERFACE.md §M2)", () => {
+describe("buildFillJobPlan — ABI conformance (contracts/README.md §M2)", () => {
   const inputHashHex = sha2_256Hex("what is 2+2?");
   const plan = buildFillJobPlan({
     gixPackageId: GIX,
@@ -123,7 +123,7 @@ describe("buildFillJobPlan — ABI conformance (contracts/INTERFACE.md §M2)", (
     });
   });
 
-  it("pins the testnet DEEP coin type from m2-phase0-design.md / INTERFACE.md", () => {
+  it("pins the testnet DEEP coin type from m2-phase0-design.md / contracts/README.md", () => {
     expect(TESTNET_DEEP_COIN_TYPE).toBe(
       "0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8::deep::DEEP",
     );

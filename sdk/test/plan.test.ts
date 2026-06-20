@@ -4,7 +4,7 @@ import { hexToBytes, sha2_256Hex } from "../src/hash.js";
 import type { MarketDeployment } from "../src/types.js";
 
 /**
- * Assert the create_job PTB plan against contracts/INTERFACE.md:
+ * Assert the create_job PTB plan against contracts/README.md:
  *   create_job<M>(cfg, market: &Market<M>, stake: &mut ProviderStake, provider,
  *     credits: Coin<Credit<M>>, escrow_in: Coin<MOCK_USDC>, input_hash, clk, ctx): ID
  * Target, type-arg (the Credit<M> witness), and the 8-arg ORDER are load-bearing.
@@ -16,7 +16,7 @@ const market: MarketDeployment = {
   creditType: `${PKG}::markets::M_H100_LLAMA8B`,
 };
 
-describe("buildCreateJobPlan — ABI conformance (contracts/INTERFACE.md)", () => {
+describe("buildCreateJobPlan — ABI conformance (contracts/README.md)", () => {
   const inputHashHex = sha2_256Hex("what is 2+2?");
   const plan = buildCreateJobPlan({
     packageId: PKG,

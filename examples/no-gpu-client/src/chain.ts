@@ -2,7 +2,7 @@
  * The on-chain half of the GPU-less buy: the two-account taker fill.
  *
  * The consumer buys from a DIFFERENT provider's wallet by filling a shared
- * `Ask<M>` — it NEVER touches a provider-owned object (contracts/INTERFACE.md
+ * `Ask<M>` — it NEVER touches a provider-owned object (contracts/README.md
  * §"Shared-Ask order book"):
  *
  *   job::create_job_from_ask<M>(
@@ -63,7 +63,7 @@ export function buildCreateJobFromAskPlan(args: {
   inputHashHex: string;
 }): CreateJobFromAskPlan {
   // escrow >= qty_scu * price_usdc_per_scu  (EInsufficientEscrow = 407 otherwise).
-  // Clients SHOULD fund exactly the minimum unless a tip is intended (INTERFACE.md).
+  // Clients SHOULD fund exactly the minimum unless a tip is intended (contracts/README.md).
   const escrow = args.scuQty * args.pricePerScu;
   return {
     splitEscrow: { fromMergedPrimary: true, amount: escrow },
@@ -103,7 +103,7 @@ export function escrowFor(scuQty: bigint, pricePerScu: bigint): bigint {
 // └─────────────────────────────────────────────────────────────────────────────┘
 //
 // create_job_from_fill<M>(cfg, market, provider_rec, credits: Coin<Credit<M>>,
-//   input_blob_id: u256, input_hash: vector<u8>, clk, ctx): ID   (INTERFACE.md)
+//   input_blob_id: u256, input_hash: vector<u8>, clk, ctx): ID   (contracts/README.md)
 // ════════════════════════════════════════════════════════════════════════════
 
 /** A declarative, SDK-object-free description of the create_job_from_fill PTB.

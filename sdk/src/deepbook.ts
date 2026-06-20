@@ -9,11 +9,11 @@
  *
  * The two commands compose in ONE consumer-signed PTB: the swap returns LOOSE
  * coins the next command consumes (the resting maker — the provider — is paid
- * USDC at the fill). See contracts/INTERFACE.md §"M2 — DeepBook fill jobs" and
+ * USDC at the fill). See contracts/README.md §"M2 — DeepBook fill jobs" and
  * docs/m2-phase0-design.md (Option B).
  *
  * Kept pure (no @mysten/* objects at module load) so the load-bearing argument
- * construction — targets, type-args, arg ORDER vs INTERFACE.md — is unit-tested.
+ * construction — targets, type-args, arg ORDER vs contracts/README.md — is unit-tested.
  * `GixChain.createJobFromFill` materializes this plan into a live Transaction.
  */
 
@@ -32,7 +32,7 @@ export interface DeepbookTestnetConstants {
 }
 
 /** The canonical testnet DEEP coin type (pinned, per docs/m2-phase0-design.md +
- * INTERFACE.md). Used as a fallback assertion target in tests. */
+ * contracts/README.md). Used as a fallback assertion target in tests. */
 export const TESTNET_DEEP_COIN_TYPE =
   "0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8::deep::DEEP";
 
@@ -88,7 +88,7 @@ export interface FillJobPlan {
  *                 minBaseOut: u64, clock ]
  *   returns   = (Coin<Credit<M>>, Coin<MOCK_USDC>, Coin<DEEP>)
  *
- * Command 2 (GIX — contracts/INTERFACE.md §M2):
+ * Command 2 (GIX — contracts/README.md §M2):
  *   create_job_from_fill<M>(cfg, market, provider_rec, credits, input_blob_id,
  *     input_hash, clk, ctx): ID
  *   typeArgs  = [ M ]   (the Credit<M> witness, = market.creditType)

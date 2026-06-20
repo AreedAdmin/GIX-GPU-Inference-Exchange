@@ -2,7 +2,7 @@
  * SuiChain — the on-chain `Chain` implementation. Builds PTBs with @mysten/sui
  * and submits them against a localnet running the `gix` package.
  *
- * STATUS: reconciled against the AS-BUILT `gix` ABI in contracts/INTERFACE.md and
+ * STATUS: reconciled against the AS-BUILT `gix` ABI in contracts/README.md and
  * contracts/sources/*.move (M1). Every `tx.moveCall` target, arg order, and type
  * arg below matches the deployed package. See src/chain/INTERFACE_ASSUMPTIONS.md
  * for the per-item reconciliation log.

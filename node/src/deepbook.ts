@@ -8,7 +8,7 @@
  * (which pays this maker at the fill, off-chain to GIX) and feeds the credits into
  * `job::create_job_from_fill` in the same PTB. See docs/m2-phase0-design.md (Option B).
  *
- * Composition (per INTERFACE.md): the gix package takes NO DeepBook Move dependency — the
+ * Composition (per contracts/README.md): the gix package takes NO DeepBook Move dependency — the
  * link is purely the `Pool` id bound on `Market<M>` (market::set_deepbook_pool_id) and the
  * DEEP coin / package ids the SDK supplies. This module owns the DeepBook side only:
  *   1. createBalanceManager()   — create + share a BalanceManager (owned by this node).

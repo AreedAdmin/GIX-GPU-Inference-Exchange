@@ -243,7 +243,7 @@ async function main(): Promise<void> {
   };
 
   // 5. Serve loop — subscribe to Dispatched. create_job_from_ask<M> emits BOTH JobCreated
-  //    AND Dispatched (INTERFACE.md), so this same subscription serves two-account jobs
+  //    AND Dispatched (contracts/README.md), so this same subscription serves two-account jobs
   //    (consumer != provider) identically to legacy owned-credit jobs. The job's `provider`
   //    is this node (= ask.provider); the consumer's address is irrelevant to the node, and
   //    no consumer-owned object is ever needed — we fetch the prompt by input_hash from the

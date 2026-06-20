@@ -15,14 +15,14 @@
  * IMPORTANT — ABI reconciliation:
  *   The demo §1 target signatures (register_provider with attest_pubkey;
  *   submit_signed_attestation) are being FINALIZED by D1. The as-built M1
- *   contracts/INTERFACE.md still has register_provider(operator, endpoint,
+ *   contracts/README.md still has register_provider(operator, endpoint,
  *   gpu_class, ctx) and submit_mock_attestation only. So this module:
  *     • targets the §1 signed-attestation entrypoints by default, AND
  *     • is feature-flagged (GIX_ATTEST_MODE=signed|mock) so the node runs against
  *       either the redeployed soft-attestation contract OR the current M1 mock
  *       contract for a localnet smoke test.
  *   Arg orders for the signed path follow demo §1 verbatim; reconcile to the final
- *   INTERFACE.md once D1 publishes.
+ *   contracts/README.md once D1 publishes.
  */
 
 import type { Keypair } from "@mysten/sui/cryptography";
@@ -228,7 +228,7 @@ export class NodeChain {
   // ---- post resting Ask (two-account order book, E3) ---------------------
 
   /**
-   * Publish resting capacity as a shared `Ask<M>` (INTERFACE.md §"Shared-Ask order book").
+   * Publish resting capacity as a shared `Ask<M>` (contracts/README.md §"Shared-Ask order book").
    *
    *   post_ask<M>(cap, &mut stake, cfg, &mut market, qty_scu, price_usdc_per_scu, ctx): ID
    *
@@ -287,7 +287,7 @@ export class NodeChain {
   /**
    * Read the resting Ask's `remaining_scu` (decrements on each consumer fill). Used by the
    * top-up loop to decide when to re-post. Returns undefined if the Ask object is gone or
-   * unreadable. INTERFACE.md: `ask::remaining_scu<M>(&Ask<M>): u64`, mirrored as a field on
+   * unreadable. contracts/README.md: `ask::remaining_scu<M>(&Ask<M>): u64`, mirrored as a field on
    * the shared object so we can read it straight off the object content.
    */
   async getAskRemaining(askId: string): Promise<number | undefined> {

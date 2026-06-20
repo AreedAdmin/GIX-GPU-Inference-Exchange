@@ -142,6 +142,6 @@ npm run typecheck   # tsc --noEmit
 ```
 
 The unit tests pin the `create_job_from_ask` PTB (target, `<M>` type-arg, arg
-order, escrow math) against `contracts/INTERFACE.md`, the `sha2_256` verifiable-
+order, escrow math) against `contracts/README.md`, the `sha2_256` verifiable-
 result check, and the config precedence. The live buy is wired and runs against a
 node that has posted an `Ask` on a package built from the current contracts.

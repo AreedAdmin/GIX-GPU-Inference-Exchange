@@ -26,13 +26,13 @@ describe("sha2_256 (matches Move sui::hash::sha2_256)", () => {
     );
   });
 
-  it("INTERFACE.md vector: sha2_256('hello gix')", () => {
+  it("contracts/README.md vector: sha2_256('hello gix')", () => {
     expect(sha2_256Hex("hello gix")).toBe(
       "920a337685c06a488ac99d78c3a063c6c374468266113d7c5870770d116ef9dc",
     );
   });
 
-  it("INTERFACE.md vector: sha2_256('hello from llama')", () => {
+  it("contracts/README.md vector: sha2_256('hello from llama')", () => {
     expect(sha2_256Hex("hello from llama")).toBe(
       "4e189c771ae26adff09cb7b5449fab04d2673d86632cd44467858fb977e9bb8e",
     );

@@ -190,7 +190,7 @@ public fun create_job<M, Q>(
 /// assert the record's gpu_class is sane only by binding the operator address — there is no
 /// on-chain proof that THIS record was the DeepBook maker the swap filled against. Multi-
 /// provider trustless dispatch (resolving the filled `maker_balance_manager_id → owner()` and
-/// proving the credit provenance) is **DEFERRED** — see INTERFACE.md "DEFERRED".
+/// proving the credit provenance) is **DEFERRED** — see contracts/README.md "DEFERRED".
 ///
 /// Requires the market to have a bound DeepBook pool (`assert_has_deepbook_pool`).
 public fun create_job_from_fill<M, Q>(

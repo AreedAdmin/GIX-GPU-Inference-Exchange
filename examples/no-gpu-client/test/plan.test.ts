@@ -7,7 +7,7 @@ import {
 import { hexToBytes, sha2_256Hex } from "../src/hash.js";
 
 /**
- * Assert the create_job_from_ask PTB plan against contracts/INTERFACE.md:
+ * Assert the create_job_from_ask PTB plan against contracts/README.md:
  *   job::create_job_from_ask<M>(
  *     cfg, market: &Market<M>, ask: &mut Ask<M>, qty_scu: u64,
  *     escrow_in: Coin<MOCK_USDC>, input_hash: vector<u8>, clk: &Clock, ctx): ID
@@ -40,7 +40,7 @@ describe("create_job_from_ask PTB plan (two-account buy)", () => {
   });
 
   it("has exactly 7 PTB-visible args in the contract order", () => {
-    // ctx is implicit; INTERFACE.md lists 8 params including ctx.
+    // ctx is implicit; contracts/README.md lists 8 params including ctx.
     const roles = plan.createJob.arguments.map((a) => a.role);
     expect(roles).toEqual([
       "cfg",
@@ -94,7 +94,7 @@ describe("create_job_from_ask PTB plan (two-account buy)", () => {
 });
 
 /**
- * Assert the M2 create_job_from_fill PTB plan against contracts/INTERFACE.md:
+ * Assert the M2 create_job_from_fill PTB plan against contracts/README.md:
  *   job::create_job_from_fill<M>(
  *     cfg, market: &Market<M>, provider_rec: &ProviderRecord,
  *     credits: Coin<Credit<M>>, input_blob_id: u256, input_hash: vector<u8>,

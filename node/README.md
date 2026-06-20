@@ -125,5 +125,5 @@ attest_pubkey, ctx)` and `submit_signed_attestation(...)`) are being finalized b
 as-built M1 ABI (`register_provider(operator, endpoint, gpu_class, ctx)` +
 `submit_mock_attestation`) under `GIX_ATTEST_MODE=mock` so the node can smoke-test the
 full register→stake→mint→serve loop against the current localnet deploy today. When D1
-publishes the final `submit_signed_attestation` arg list in `contracts/INTERFACE.md`,
+publishes the final `submit_signed_attestation` arg list in `contracts/README.md`,
 reconcile the `signed`-mode `moveCall` args there.

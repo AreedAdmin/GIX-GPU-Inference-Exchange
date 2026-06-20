@@ -116,4 +116,4 @@ ABI assumption — call targets, argument orders, the mock-measurement sentinel,
 slash sizing, and two `deployment.json` schema gaps (`modelId`, `treasuryId`) — is
 enumerated in [`src/chain/INTERFACE_ASSUMPTIONS.md`](src/chain/INTERFACE_ASSUMPTIONS.md).
 That file is the single reconciliation checklist for integration against the real
-`gix` package / `contracts/INTERFACE.md`.
+`gix` package / `contracts/README.md`.

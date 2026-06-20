@@ -47,7 +47,7 @@ to the on-chain hash.
 
 When `deployment.network === "testnet"`, `runTask` switches rails: it **buys
 capacity on a real DeepBook pool** and uses **Walrus** for the input/output
-blobs (`contracts/INTERFACE.md` §"M2 — DeepBook fill jobs"). The localnet escrow
+blobs (`contracts/README.md` §"M2 — DeepBook fill jobs"). The localnet escrow
 path above is unchanged (network-switched).
 
 ```ts
@@ -138,7 +138,7 @@ a real run; the `runTask` test mocks the chain module and injects a fake `fetch`
   `GET /result/:jobId -> { jobId, model, output, outputHash, outputTokenCount,
   tStart, tEnd, measurement, signature, attestPubkey }`. The node serves
   `/result` only *after* settlement (the SDK polls).
-- **`create_job` ABI** (`contracts/INTERFACE.md`): target `…::job::create_job`,
+- **`create_job` ABI** (`contracts/README.md`): target `…::job::create_job`,
   one type-arg `Credit<M>` witness, 8 args in order
   `(cfg, market, stake, provider, credits, escrow_in, input_hash, clk)`.
 - **Event names** (`gix::events`): `AttestationSubmitted` (carries `output_hash`,

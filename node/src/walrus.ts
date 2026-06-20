@@ -7,7 +7,7 @@
  * `create_job_from_fill`). When a fill-job carries `input_blob_id != 0` the node READS
  * the prompt back from Walrus by that id; otherwise it falls back to the /inputs cache.
  *
- * Important framing (docs/m2-phase0-design.md + contracts/INTERFACE.md):
+ * Important framing (docs/m2-phase0-design.md + contracts/README.md):
  *   - The Walrus `blob_id` is a STORAGE COMMITMENT, not a content hash. GIX's `sha2_256`
  *     digests (input_hash / output_hash) stay the verification primitive. We recompute
  *     sha2_256 over whatever we read from Walrus and the serve loop refuses on mismatch.

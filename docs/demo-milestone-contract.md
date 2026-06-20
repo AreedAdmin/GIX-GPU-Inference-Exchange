@@ -6,14 +6,14 @@ with the result returned + cryptographically checked. Trust is **softened** (reg
 signature, not yet hardware TEE) and the **order book is still stubbed** (DeepBook = M2); those
 are the funded roadmap, not the demo.
 
-Builds on M1 (`contracts/INTERFACE.md`, `docs/mvp-m1-integration-contract.md`) and M1.5
+Builds on M1 (`contracts/README.md`, `docs/mvp-m1-integration-contract.md`) and M1.5
 (`docs/mvp-m1_5-ui-contract.md`). Networks: build/iterate on **localnet**, demo on **testnet**.
 Settlement asset: **MOCK_USDC** (test). Model: **llama3.1:8b** via **Ollama** (installed on the
 GB10); larger models are a runtime config flip.
 
 Workstreams (disjoint dirs; integrate against this contract):
 - **D1 — `contracts/`** (sui-pilot): soft attestation. **Authoritative for the final ABI** →
-  records it in `contracts/INTERFACE.md`; others reconcile to that.
+  records it in `contracts/README.md`; others reconcile to that.
 - **D0 — `node/`**: provider node (Ollama) — produces signed attestations + serves results.
 - **D2 — `services/gateway/` + `sdk/`**: OpenAI-compatible gateway + TS SDK (consumer side).
 - **D3 — `web/`** (trade/wallet only): wallet connect + real buy + result viewer.
@@ -28,7 +28,7 @@ Pattern: **register a provider attestation key once, verify a native Ed25519 sig
 for off-localnet use; **keep `submit_mock_attestation` (gated by `is_localnet`) so M1/M1.5 demos
 still work**.
 
-ABI (target signatures — D1 may refine, must publish final in `contracts/INTERFACE.md`):
+ABI (target signatures — D1 may refine, must publish final in `contracts/README.md`):
 ```
 // registry: a provider registers its Ed25519 attestation pubkey (32 bytes) + HTTP endpoint.
 public fun register_provider(
@@ -129,7 +129,7 @@ served by a decentralized GPU, settled on-chain.*
 
 ## 7. Definition of done
 - D1: `sui move test` green incl. new signed-attestation tests; `submit_signed_attestation` verifies
-  a real Ed25519 sig off-localnet; INTERFACE.md updated.
+  a real Ed25519 sig off-localnet; contracts/README.md updated.
 - D0: node registers + serves a real `llama3.1:8b` completion on the GB10 and submits a signature
   the contract accepts; `/result/:jobId` returns a hash-matching output.
 - D2: `curl POST /v1/chat/completions` returns a real completion paid on-chain; SDK `runTask` works

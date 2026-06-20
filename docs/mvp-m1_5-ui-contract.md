@@ -13,7 +13,7 @@ Product framing: each market is a `Credit<M>/USDC` pair. **Base = compute credit
 1k output tokens at the tier), **quote = USDC**. **Bids** = consumers buying compute, **asks**
 = providers selling capacity, **spot = USDC/SCU**, **fills = Jobs** that run + settle/slash.
 Live chain artifacts come from `deployment.json` + `gix::events` (see
-[mvp-m1-integration-contract.md](mvp-m1-integration-contract.md), `contracts/INTERFACE.md`).
+[mvp-m1-integration-contract.md](mvp-m1-integration-contract.md), `contracts/README.md`).
 
 ---
 
@@ -208,7 +208,7 @@ export interface OrderClient {
   sell(marketId: string, qtyScu: number, priceUsdcPerScu: number): Promise<OrderResult>;
 }
 ```
-Targets the live ABI in `contracts/INTERFACE.md` (reuse `harness/src/chain/sui.ts` logic).
+Targets the live ABI in `contracts/README.md` (reuse `harness/src/chain/sui.ts` logic).
 On submit, optimistic row in Open Orders → tracked into My Jobs as chain events arrive.
 
 ---

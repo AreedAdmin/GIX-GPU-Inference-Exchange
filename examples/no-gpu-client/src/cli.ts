@@ -10,7 +10,7 @@
  *   npm start -- --prompt "Your prompt here" --fund
  *   npm start -- --config ./config.json "Your prompt here"
  *
- * Flow (demo-milestone-contract §3.1 + INTERFACE.md two-account buy):
+ * Flow (demo-milestone-contract §3.1 + contracts/README.md two-account buy):
  *   1. POST {prompt} -> provider /inputs        => inputHash
  *   2. job::create_job_from_ask<M>(...)         => Job id, funds MOCK_USDC escrow
  *   3. await Settled / AttestationSubmitted     => on-chain output_hash

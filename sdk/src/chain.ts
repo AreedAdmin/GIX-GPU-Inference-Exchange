@@ -13,7 +13,7 @@
  *
  * Hermetic by design: nothing imports @mysten/sui at module load; the SDK is
  * dynamically imported the first time `connect()` runs. The pure PTB plan
- * (`buildCreateJobPlan`) is exported for unit tests against contracts/INTERFACE.md.
+ * (`buildCreateJobPlan`) is exported for unit tests against contracts/README.md.
  *
  * NOTE (integration reconcile): this mirrors sui.ts rather than importing it to
  * keep the SDK a standalone package; the two will be reconciled to one chain lib.
@@ -35,7 +35,7 @@ type TransactionT = import("@mysten/sui/transactions").Transaction;
 
 /** A declarative description of the create_job PTB — the load-bearing argument
  * construction, separated from any live @mysten/sui objects so it can be asserted
- * in unit tests against the ABI in contracts/INTERFACE.md. */
+ * in unit tests against the ABI in contracts/README.md. */
 export interface MoveCallPlan {
   target: string;
   typeArguments: string[];
@@ -60,7 +60,7 @@ export interface CreateJobPlan {
 
 /**
  * Build the create_job PTB plan purely from ids + amounts (no SDK objects).
- * Arg ORDER and target MUST match `job::create_job<M>` in contracts/INTERFACE.md:
+ * Arg ORDER and target MUST match `job::create_job<M>` in contracts/README.md:
  *   create_job<M>(cfg, market: &Market<M>, stake: &mut ProviderStake, provider,
  *     credits: Coin<Credit<M>>, escrow_in: Coin<MOCK_USDC>, input_hash, clk, ctx): ID
  */
@@ -337,7 +337,7 @@ export class GixChain {
    * The USDC + DEEP remainders are transferred back to the consumer. The pool
    * id comes from `market.deepbookPoolId` (governance-bound on-chain); the
    * DeepBook package id + DEEP coin type come from `@mysten/deepbook-v3`
-   * testnet constants. See contracts/INTERFACE.md §"M2 — DeepBook fill jobs".
+   * testnet constants. See contracts/README.md §"M2 — DeepBook fill jobs".
    */
   async createJobFromFill(args: {
     signer: WalletSigner;

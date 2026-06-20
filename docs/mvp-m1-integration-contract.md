@@ -12,7 +12,7 @@ Canon: [architecture/overview.md](architecture/overview.md),
 [protocol/task-lifecycle.md](protocol/task-lifecycle.md), and the **Batch-decision
 table** in [open-ended-questions.md](open-ended-questions.md) (authoritative for all
 v1 defaults). **A is the source of truth for final signatures**; if A must deviate from
-the signatures below, it records the final shape in `contracts/INTERFACE.md` and the
+the signatures below, it records the final shape in `contracts/README.md` and the
 integrator reconciles B/C.
 
 ## Scope of M1
