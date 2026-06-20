@@ -57,6 +57,16 @@ public struct CreditsMinted has copy, drop {
     qty: u64,
 }
 
+/// A provider posted a resting Ask (offered capacity at a fixed USDC/SCU price) onto the
+/// order book. The hand-rolled stand-in for a DeepBook maker order.
+public struct AskPosted has copy, drop {
+    ask_id: ID,
+    market_id: ID,
+    provider: address,
+    qty_scu: u64,
+    price_usdc_per_scu: u64,
+}
+
 public struct JobCreated has copy, drop {
     job_id: ID,
     market_id: ID,
@@ -147,6 +157,16 @@ public(package) fun unstaked(stake_id: ID, provider: address, amount: u64) {
 
 public(package) fun credits_minted(stake_id: ID, market_id: ID, provider: address, qty: u64) {
     event::emit(CreditsMinted { stake_id, market_id, provider, qty });
+}
+
+public(package) fun ask_posted(
+    ask_id: ID,
+    market_id: ID,
+    provider: address,
+    qty_scu: u64,
+    price_usdc_per_scu: u64,
+) {
+    event::emit(AskPosted { ask_id, market_id, provider, qty_scu, price_usdc_per_scu });
 }
 
 public(package) fun job_created(

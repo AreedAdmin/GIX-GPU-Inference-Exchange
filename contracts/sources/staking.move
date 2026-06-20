@@ -14,8 +14,9 @@
 /// *physical* capacity, so a provider can never oversell (lifecycle §9).
 module gix::staking;
 
+use gix::ask;
 use gix::config::Config;
-use gix::credit::Credit;
+use gix::credit::{Self, Credit};
 use gix::events;
 use gix::market::Market;
 use gix::registry::ProviderCap;
@@ -134,6 +135,48 @@ public fun mint_credits<M>(
     let credits = market.mint_credit(qty, ctx);
     events::credits_minted(object::id(stake), market.market_id(), stake.provider, qty);
     credits
+}
+
+// === Order book: post a resting Ask ===
+
+/// Post a resting `Ask<M>` onto the order book: mint `qty_scu` of this market's `Credit<M>`
+/// against this stake's free capacity (same accounting as `mint_credits` — bumps
+/// `minted_scu`, gated at `capacity_scu`) and move the freshly minted credits into a NEW
+/// **shared** `Ask<M>` priced at `price_usdc_per_scu`. Returns the new ask's `ID`.
+///
+/// Provider-signed: holds the `ProviderCap`. The credits are pre-minted real supply, so the
+/// reserve-then-burn invariant is intact — a consumer fills the ask from their own wallet
+/// (`job::create_job_from_ask`) and the drawn credits are burned at `settle`. No maker bond
+/// beyond the existing stake is required (open-question E3: no maker bonds at MVP).
+///
+/// NOTE: `market` is `&mut` (not `&`) because the credit `Supply<Credit<M>>` lives inside the
+/// `Market` — minting co-locates with the market exactly as `mint_credits` does.
+public fun post_ask<M>(
+    cap: &ProviderCap,
+    stake: &mut ProviderStake,
+    cfg: &Config,
+    market: &mut Market<M>,
+    qty_scu: u64,
+    price_usdc_per_scu: u64,
+    ctx: &mut TxContext,
+): ID {
+    cfg.assert_version();
+    cfg.assert_not_paused();
+    assert!(cap.cap_provider() == stake.provider, EWrongProvider);
+    market.assert_active();
+    assert!(qty_scu > 0, EZeroQty);
+    // B6: never mint beyond physical capacity (same gate as mint_credits).
+    assert!(stake.minted_scu + qty_scu <= stake.capacity_scu, EInsufficientCapacity);
+    stake.minted_scu = stake.minted_scu + qty_scu;
+    let credits_coin = market.mint_credit(qty_scu, ctx);
+    events::credits_minted(object::id(stake), market.market_id(), stake.provider, qty_scu);
+    ask::post<M>(
+        stake.provider,
+        market.market_id(),
+        credit::from_coin(credits_coin),
+        price_usdc_per_scu,
+        ctx,
+    )
 }
 
 // === Capacity reservation (package-internal: job / settlement) ===

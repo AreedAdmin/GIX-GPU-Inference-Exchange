@@ -12,6 +12,7 @@
 /// the Job is still the single disjoint settlement atom.
 module gix::job;
 
+use gix::ask::{Self, Ask};
 use gix::config::Config;
 use gix::credit::{Self, Credit};
 use gix::escrow::{Self, Escrow};
@@ -29,6 +30,8 @@ const EBadState: u64 = 400;
 const EEscrowMismatch: u64 = 401;
 const EWrongProvider: u64 = 304;
 const EZeroQty: u64 = 405;
+const EInsufficientEscrow: u64 = 407;
+const EWrongMarket: u64 = 408;
 const EAttestDeadline: u64 = 500;
 const EAlreadyAttested: u64 = 503;
 
@@ -126,8 +129,97 @@ public fun create_job<M>(
     // Reserve provider capacity for this in-flight job (bounds concurrent exposure).
     staking::reserve(stake, scu_qty);
 
+    build_and_share<M>(
+        cfg,
+        market,
+        provider,
+        ctx.sender(),
+        credit::from_coin(credits),
+        scu_qty,
+        escrow_in,
+        price_usdc,
+        input_hash,
+        clk,
+        ctx,
+    )
+}
+
+// === Creation from a resting Ask (two-account / order-book path) ===
+
+/// Create a Job by filling a resting shared `Ask<M>` — the consumer-signed taker path that
+/// lets a DISTINCT consumer wallet (buyer ≠ seller) buy compute from a provider's offered
+/// capacity WITHOUT ever touching a provider-owned object (no `ProviderStake`, no
+/// `ProviderCap`). The only provider object in scope is the shared `Ask` itself.
+///
+/// Draws `qty_scu` credits out of the shared ask, locks the consumer's escrow, and shares a
+/// `Job<M>` bound to `ask.provider` (consumer = `ctx.sender()`), advancing straight to
+/// `Dispatched`. The escrow must fund the ask's quoted price (`escrow ≥ qty_scu *
+/// price_usdc_per_scu`); the job's `price_usdc` is the FULL escrow value (any overpay sits
+/// in escrow and is paid to the provider at settle / refunded on fault, exactly like the
+/// owned-credits path).
+///
+/// Capacity note: the ask's credits are pre-minted real supply (`minted_scu` already bumped
+/// at `post_ask`), so this path does NOT bump `reserved_scu` — the consumer cannot reach the
+/// provider's stake to do so, and minted capacity already bounds exposure. At `settle` the
+/// provider signs with its own stake; `consume_minted` retires the minted SCU and `release`
+/// is a tolerant no-op. Settlement therefore pays `ask.provider` (and, on fault, slashes the
+/// provider's bond) entirely through the existing provider-signed paths.
+public fun create_job_from_ask<M>(
+    cfg: &Config,
+    market: &Market<M>,
+    ask: &mut Ask<M>,
+    qty_scu: u64,
+    escrow_in: Coin<MOCK_USDC>,
+    input_hash: vector<u8>,
+    clk: &Clock,
+    ctx: &mut TxContext,
+): ID {
+    cfg.assert_version();
+    cfg.assert_not_paused();
+    market.assert_active();
+    assert!(ask::market_id<M>(ask) == market.market_id(), EWrongMarket);
+    assert!(qty_scu > 0, EZeroQty);
+
+    // Underfunded escrow rejected; over-draw rejected (inside ask::draw).
+    let price = escrow_in.value();
+    let required = (qty_scu as u128) * (ask::price_usdc_per_scu<M>(ask) as u128);
+    assert!((price as u128) >= required, EInsufficientEscrow);
+
+    let provider = ask::provider<M>(ask);
+    let credits = ask::draw<M>(ask, qty_scu);
+
+    build_and_share<M>(
+        cfg,
+        market,
+        provider,
+        ctx.sender(),
+        credits,
+        qty_scu,
+        escrow_in,
+        price,
+        input_hash,
+        clk,
+        ctx,
+    )
+}
+
+/// Shared Job constructor: locks escrow, copies SLA deadlines, advances to `Dispatched`,
+/// emits `JobCreated` + `Dispatched`, shares the Job and returns its `ID`. Used by both the
+/// owned-credits path (`create_job`) and the order-book path (`create_job_from_ask`).
+fun build_and_share<M>(
+    cfg: &Config,
+    market: &Market<M>,
+    provider: address,
+    consumer: address,
+    credits: Balance<Credit<M>>,
+    scu_qty: u64,
+    escrow_in: Coin<MOCK_USDC>,
+    price_usdc: u64,
+    input_hash: vector<u8>,
+    clk: &Clock,
+    ctx: &mut TxContext,
+): ID {
     let now = clk.timestamp_ms();
-    let consumer = ctx.sender();
     let job = Job<M> {
         id: object::new(ctx),
         version: cfg.version(),
@@ -141,7 +233,7 @@ public fun create_job<M>(
         scu_qty,
         price_usdc,
         escrow: escrow::lock(escrow_in, consumer),
-        reserved_credits: credit::from_coin(credits),
+        reserved_credits: credits,
         created_at: now,
         ack_deadline: now + market.ack_deadline_ms(),
         exec_deadline: now + market.exec_deadline_ms(),

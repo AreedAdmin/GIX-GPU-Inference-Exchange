@@ -9,18 +9,24 @@ This file records the **as-built** public entrypoint signatures and the **deviat
 - Sui CLI built/tested against: **1.73.1**. Move edition **2024**. (`sui move build/test`
   require `--build-env testnet` or `--build-env mainnet`; localnet deps are resolved at
   publish time via `test-publish`.)
-- `sui move build`: green (no warnings). `sui move test`: **20/20 passing** (15 M1 +
-  5 soft-attestation). See §"Soft attestation" for the new signed path.
+- `sui move build`: green (no warnings). `sui move test`: **26/26 passing** (15 M1 +
+  5 soft-attestation + 6 shared-Ask order-book). See §"Soft attestation" for the signed
+  path and §"Shared-Ask order book (two-account flow)" for the new buyer≠seller path.
 - Dev quote/escrow/bond coin: **`gix::mock_usdc::MOCK_USDC`** (6 decimals).
 - Per-market credit witness for M1: **`gix::markets::M_H100_LLAMA8B`** → coin type
   `gix::credit::Credit<gix::markets::M_H100_LLAMA8B>`.
 
 ---
 
-## Module list (14 published modules)
+## Module list (15 published modules)
 
 `config`, `events`, `mock_usdc`, `registry`, `credit`, `market`, `markets`, `staking`,
-`escrow`, `job`, `attestation`, `slashing`, `settlement`, `governance`.
+`ask`, `escrow`, `job`, `attestation`, `slashing`, `settlement`, `governance`.
+
+> New in this revision: **`ask`** — the first brick of the on-chain order book (a hand-rolled
+> mini-DeepBook). It defines the shared resting-maker-order object `Ask<phantom M>`. Posted
+> by `staking::post_ask`, filled by `job::create_job_from_ask`. See
+> §"Shared-Ask order book (two-account flow)".
 
 > Note: error codes are declared as **per-module `const`s** (namespaced by decade, e.g.
 > `4xx` = job/escrow), not a single shared `errors` module — this is required for clean
@@ -72,11 +78,50 @@ public fun stake(cap: &ProviderCap, cfg: &Config, bond: Coin<MOCK_USDC>, capacit
 public fun add_bond(cap: &ProviderCap, stake: &mut ProviderStake, bond: Coin<MOCK_USDC>, extra_capacity_scu: u64)
 public fun unstake(cap: &ProviderCap, stake: &mut ProviderStake, amount: u64, clk: &Clock, ctx: &mut TxContext): Coin<MOCK_USDC>
 public fun mint_credits<M>(cap: &ProviderCap, stake: &mut ProviderStake, cfg: &Config, market: &mut Market<M>, qty: u64, ctx: &mut TxContext): Coin<Credit<M>>
+// NEW (order book): mint `qty_scu` Credit<M> against free capacity and move them into a NEW
+// shared Ask<M> priced at `price_usdc_per_scu`. Provider-signed (holds ProviderCap). Same
+// capacity accounting as mint_credits (bumps minted_scu, gated at capacity_scu; emits
+// CreditsMinted). Emits AskPosted. Returns the new Ask's ID. `market` is &mut (the credit
+// Supply lives in the Market). No maker bond beyond the existing stake (E3).
+public fun post_ask<M>(cap: &ProviderCap, stake: &mut ProviderStake, cfg: &Config, market: &mut Market<M>, qty_scu: u64, price_usdc_per_scu: u64, ctx: &mut TxContext): ID   // shares Ask<M>
+```
+
+### Order book (shared Ask) — `gix::ask`
+```move
+// Shared resting maker order. Created/shared by staking::post_ask; drawn down by
+// job::create_job_from_ask. The credits inside are pre-minted real supply.
+public struct Ask<phantom M> has key {
+    id: UID,
+    version: u64,
+    provider: address,                 // seller — payout + slash target at settlement
+    market_id: ID,                     // must match the Market<M> a job is created in
+    credits: Balance<Credit<M>>,       // remaining offered capacity, as a Balance
+    price_usdc_per_scu: u64,           // quoted price; escrow must cover qty * this
+    remaining_scu: u64,                // == balance::value(credits); decrements on each fill
+}
+// Reads (no public constructor/draw — those are package-internal, driven by staking/job):
+public fun provider<M>(ask: &Ask<M>): address
+public fun market_id<M>(ask: &Ask<M>): ID
+public fun price_usdc_per_scu<M>(ask: &Ask<M>): u64
+public fun remaining_scu<M>(ask: &Ask<M>): u64
+public fun credits_value<M>(ask: &Ask<M>): u64
+// Error codes: EZeroQty = 405, EInsufficientRemaining = 406 (over-draw qty > remaining).
 ```
 
 ### Job + escrow — `gix::job`
 ```move
+// BACK-COMPAT single-account path (buyer must own the provider's minted Coin<Credit<M>>):
 public fun create_job<M>(cfg: &Config, market: &Market<M>, stake: &mut ProviderStake, provider: address, credits: Coin<Credit<M>>, escrow_in: Coin<MOCK_USDC>, input_hash: vector<u8>, clk: &Clock, ctx: &mut TxContext): ID   // shares Job<M>
+// NEW two-account path (buyer ≠ seller): consumer-signed taker fill of a resting shared Ask.
+// Asserts ask.market_id == market.market_id (EWrongMarket = 408), qty_scu > 0, and
+// escrow.value() >= qty_scu * ask.price_usdc_per_scu (EInsufficientEscrow = 407). Over-draw
+// (qty_scu > ask.remaining_scu) aborts inside ask::draw (ask::EInsufficientRemaining = 406).
+// Draws qty_scu credits OUT of the shared ask, locks escrow, shares a Job bound to
+// ask.provider (consumer = ctx.sender()), advances to Dispatched, decrements
+// ask.remaining_scu, emits JobCreated + Dispatched. Returns the new Job's ID. The Job's
+// price_usdc = the FULL escrow value (overpay rides along to the provider at settle).
+// NO ProviderStake / ProviderCap in scope — the consumer touches only the shared Ask.
+public fun create_job_from_ask<M>(cfg: &Config, market: &Market<M>, ask: &mut Ask<M>, qty_scu: u64, escrow_in: Coin<MOCK_USDC>, input_hash: vector<u8>, clk: &Clock, ctx: &mut TxContext): ID   // shares Job<M>
 public fun ack<M>(job: &mut Job<M>, clk: &Clock, ctx: &TxContext)
 ```
 
@@ -203,6 +248,117 @@ signature   = a6fe084d82d0846c2e3e8b4ff0fd59b09b4a95387300cd27a2e464442174ac9845
 
 ---
 
+## Shared-Ask order book (two-account flow) — D1 authoritative
+
+This is the first brick of the on-chain order book (a hand-rolled mini-DeepBook), enabling
+a consumer's wallet to buy compute from a DIFFERENT provider's wallet. Before this, the only
+job path was `create_job`, which forces **buyer == seller** because it consumes the
+provider's *owned* `Coin<Credit<M>>` (the buyer had to be holding the provider's minted
+coin). The shared `Ask<M>` removes that constraint: the provider parks credits in a shared
+object, and any stranger fills against it.
+
+### Lifecycle (buyer ≠ seller)
+
+```
+PROVIDER wallet (seller)                         CONSUMER wallet (buyer, distinct address)
+────────────────────────                         ─────────────────────────────────────────
+register_provider  →  ProviderCap (owned)
+stake(bond,cap)    →  ProviderStake (owned)
+post_ask<M>(cap, &mut stake, cfg,
+            &mut market, qty_scu,
+            price_usdc_per_scu)
+   ├─ mints qty_scu Credit<M> (minted_scu += qty)
+   ├─ moves them into a NEW *shared* Ask<M>
+   └─ emits CreditsMinted + AskPosted ─────────▶  (Ask<M> is now a SHARED object on chain)
+
+                                                  create_job_from_ask<M>(cfg, &market,
+                                                       &mut ask, qty_scu, escrow_in,
+                                                       input_hash, clk)
+                                                     ├─ assert escrow ≥ qty_scu*price
+                                                     ├─ assert qty_scu ≤ remaining_scu
+                                                     ├─ draw qty_scu credits OUT of ask
+                                                     ├─ share Job<M>{provider=ask.provider,
+                                                     │             consumer=ctx.sender()}
+                                                     └─ emits JobCreated + Dispatched
+ack<M>(&mut job)            ◀─ provider signs ──────  (job.provider == ask.provider)
+submit_*_attestation<M>(…)  ◀─ provider signs
+settle<M>(&mut job, &mut market, cfg,
+          &mut stake, &mut treasury)  ◀─ provider (or anyone) signs, passing the PROVIDER's
+                                          own stake:
+   ├─ pays job.provider (= ask.provider)  price − fee
+   ├─ burns the drawn credits, consume_minted(stake, qty)
+   └─ release(stake, qty)  ← tolerant no-op for ask jobs (see capacity note)
+```
+
+The consumer (buyer) **never references a provider-owned object** anywhere in the flow. In
+`create_job_from_ask` the only provider-side object in scope is the **shared** `Ask<M>`;
+`ProviderStake` and `ProviderCap` are never passed by the consumer. The provider drives
+ack/attest/settle with its own owned objects exactly as in the single-account path — so the
+existing `settlement::settle` / `resolve_attested` / `expire_and_resolve` / `cancel` paths
+work unchanged, paying `ask.provider` and slashing the provider's stake via the
+provider-signed path.
+
+### Capacity accounting (reserve-then-burn intact)
+
+- `post_ask` performs the SAME mint accounting as `mint_credits`: it asserts
+  `minted_scu + qty_scu ≤ capacity_scu` (B6) and bumps `minted_scu`. The credits inside the
+  ask are therefore **real minted supply**.
+- Ask-created jobs deliberately do **not** bump `reserved_scu` (the consumer cannot reach
+  the provider's stake to do so, and minted capacity already bounds exposure). At settlement
+  `consume_minted(stake, qty)` retires the minted SCU and `release(stake, qty)` is a tolerant
+  no-op (it floors at 0). Net invariant: every credit minted for an ask is either burned at
+  `settle` or returned to the provider on fault/cancel — the mint→burn chain is preserved.
+- Contrast: the owned-credits `create_job` still reserves (`reserved_scu += qty`) at creation
+  because it has `&mut stake` in scope. The two paths thus differ only in whether
+  `reserved_scu` reflects the in-flight job; `minted_scu` and bond exposure are identical.
+
+### New event
+
+```move
+public struct AskPosted has copy, drop {
+    ask_id: ID,
+    market_id: ID,
+    provider: address,
+    qty_scu: u64,
+    price_usdc_per_scu: u64,
+}
+```
+
+### Reconciliation notes for E2 (node) and E3 (Mac client)
+
+- **E2 (node).** A provider node now has two ways to bring capacity to market: (a) legacy —
+  `mint_credits` then hand the `Coin<Credit<M>>` to a buyer out of band; (b) order book —
+  `post_ask<M>` to publish a resting `Ask<M>`. The node should listen for **`AskPosted`**
+  (to track its own resting liquidity / remaining_scu) and for **`JobCreated`/`Dispatched`**
+  exactly as before. **Nothing changes on the settle side**: the node still ack/attests/
+  settles a `Job<M>` with its own `ProviderStake` — ask-created jobs are indistinguishable
+  from owned-credit jobs at ack/attest/settle. `job.provider` is the payout/slash target in
+  both cases.
+- **E3 (Mac/consumer client).** To buy from a DIFFERENT provider, the client now calls
+  **`job::create_job_from_ask<M>`** against a shared `Ask<M>` object id (discovered from
+  `AskPosted` events / an off-chain order-book index), funding `escrow_in` ≥
+  `qty_scu * ask.price_usdc_per_scu`. The client does **not** need (and must not be given)
+  any provider-owned object. The PTB args are: `cfg`, `&market`, `&mut ask`,
+  `qty_scu: u64`, `escrow_in: Coin<MOCK_USDC>`, `input_hash`, `clk`. Type-arg `M` =
+  `creditType` from `deployment.json` (same as `create_job`). The returned `Job` `ID` is the
+  one to poll for state.
+- **Pricing semantics.** `price_usdc_per_scu` is a **per-SCU** quote on the ask; the job's
+  recorded `price_usdc` is the **full escrow value** the buyer locked (`escrow_in.value()`),
+  consistent with the owned-credits path where escrow value == agreed price. Overpaying the
+  minimum (`qty_scu * price`) is allowed and the surplus is paid to the provider at settle
+  (or refunded on fault) — clients SHOULD fund exactly `qty_scu * price_usdc_per_scu` unless
+  a tip is intended.
+- **Partial fills.** One `Ask<M>` can be filled by multiple distinct buyers until
+  `remaining_scu` hits 0; each fill mints a separate `Job<M>` that settles independently
+  (parallel settlement atom preserved). The order-book index should track `remaining_scu` off
+  the `JobCreated` deltas or by reading the shared `Ask`.
+- **No new deviation from the canon's trust boundary.** `Ask` is the M1.5 stand-in for the
+  DeepBook maker order in `sui-move-contracts.md` §5.3 (`create_job_from_fill`); when
+  DeepBook lands, `create_job_from_ask` is replaced by `create_job_from_fill` and the `Ask`
+  object retires. No maker bond is required at MVP (open-question E3).
+
+---
+
 ## Deviations from `mvp-m1-integration-contract.md` (integrator must reconcile)
 
 The integration contract said *"Exact arg lists may shift — the names, the USDC-bond shape,
@@ -263,9 +419,10 @@ shifts and additions B/C must account for:
 10. **Event field shapes.** `gix::events` emits all required events
     (`MarketCreated`, `Staked`, `CreditsMinted`, `JobCreated`, `Dispatched`,
     `AttestationSubmitted`, `Settled`, `Refunded`, `Slashed`) plus `ModelRegistered`,
-    `ProviderRegistered`, `MeasurementAdded`, `Unstaked`. `AttestationSubmitted` carries the
-    `verdict` and `output_token_count`; `Refunded` carries `reason: u8` + `slashed: bool`;
-    `Slashed` carries `to_consumer`/`to_treasury`. B should key its renderer off these.
+    `ProviderRegistered`, `MeasurementAdded`, `Unstaked`, and (new) **`AskPosted`**.
+    `AttestationSubmitted` carries the `verdict` and `output_token_count`; `Refunded` carries
+    `reason: u8` + `slashed: bool`; `Slashed` carries `to_consumer`/`to_treasury`. B should
+    key its renderer off these.
 
 ---
 

@@ -3,6 +3,7 @@
 #[test_only]
 module gix::harness;
 
+use gix::ask::{Ask};
 use gix::attestation;
 use gix::config::{Self, Config, AdminCap};
 use gix::credit::Credit;
@@ -22,6 +23,9 @@ use sui::test_scenario::{Self as ts, Scenario};
 public fun admin(): address { @0xAD }
 public fun provider(): address { @0xB0B }
 public fun consumer(): address { @0xCAFE }
+/// A second, DISTINCT consumer wallet (buyer ≠ seller, buyer ≠ default consumer) used by the
+/// two-account order-book flow to prove a stranger can buy from a provider's Ask.
+public fun consumer2(): address { @0xC02 }
 
 // M1 market parameters.
 public fun scu_tokens(): u64 { 1000 }
@@ -137,6 +141,80 @@ public fun provider_setup_with_key(
     transfer::public_transfer(cap, provider());
     transfer::public_transfer(stake, provider());
     credits
+}
+
+/// Provider registers (dummy attest key) and stakes `bond_amt` USDC opening `capacity` SCU,
+/// but mints NOTHING here — the cap + stake stay owned by the provider so the order-book
+/// flow can `post_ask` (which mints inside). Used by the two-account ask tests.
+public fun provider_register_and_stake(sc: &mut Scenario, bond_amt: u64, capacity: u64) {
+    sc.next_tx(provider());
+    let cfg = sc.take_shared<Config>();
+    let cap = registry::register_provider(&cfg, b"http://node", b"H100-80GB", dummy_pubkey(), sc.ctx());
+    let bond = mint_usdc(sc, bond_amt);
+    let stake = staking::stake(&cap, &cfg, bond, capacity, sc.ctx());
+    ts::return_shared(cfg);
+    transfer::public_transfer(cap, provider());
+    transfer::public_transfer(stake, provider());
+}
+
+/// Provider posts a resting `Ask<M>` for `qty` SCU at `price_per_scu` USDC/SCU using its
+/// owned cap + stake (signed by the provider). Mints the credits inside `post_ask`. Returns
+/// the new ask's id.
+public fun post_ask(sc: &mut Scenario, qty: u64, price_per_scu: u64): ID {
+    sc.next_tx(provider());
+    let cfg = sc.take_shared<Config>();
+    let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let cap = ts::take_from_address<ProviderCap>(sc, provider());
+    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+
+    let ask_id = staking::post_ask<M_H100_LLAMA8B>(
+        &cap,
+        &mut stake,
+        &cfg,
+        &mut market,
+        qty,
+        price_per_scu,
+        sc.ctx(),
+    );
+
+    ts::return_shared(cfg);
+    ts::return_shared(market);
+    ts::return_to_address(provider(), cap);
+    ts::return_to_address(provider(), stake);
+    ask_id
+}
+
+/// `buyer` fills the shared `Ask` for `qty` SCU, funding `escrow` USDC, WITHOUT touching any
+/// provider-owned object (no ProviderStake / ProviderCap in scope). Returns the new Job id.
+public fun create_job_from_ask(
+    sc: &mut Scenario,
+    buyer: address,
+    qty: u64,
+    escrow_amt: u64,
+): ID {
+    sc.next_tx(buyer);
+    let cfg = sc.take_shared<Config>();
+    let market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let mut ask = sc.take_shared<Ask<M_H100_LLAMA8B>>();
+    let clk = sc.take_shared<Clock>();
+    let escrow = mint_usdc(sc, escrow_amt);
+
+    let job_id = job::create_job_from_ask<M_H100_LLAMA8B>(
+        &cfg,
+        &market,
+        &mut ask,
+        qty,
+        escrow,
+        input_hash(),
+        &clk,
+        sc.ctx(),
+    );
+
+    ts::return_shared(cfg);
+    ts::return_shared(market);
+    ts::return_shared(ask);
+    ts::return_shared(clk);
+    job_id
 }
 
 /// Consumer creates a Job from the provided credits + escrow at the current clock time.
