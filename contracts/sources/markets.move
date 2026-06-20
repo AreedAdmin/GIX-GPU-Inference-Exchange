@@ -15,3 +15,10 @@ public struct M_H100_LLAMA8B has drop {}
 /// A second example market brand (A100 tier) to show multi-market typing; the deploy
 /// script may or may not instantiate it in M1.
 public struct M_A100_LLAMA8B has drop {}
+
+/// GB10 · Qwen3.6-35b market brand (testnet/demo). GPU class GB10 running model
+/// `qwen3.6-35b`, an interactive credit market with an ~p99 30s SLA. Its `Credit<M_GB10_QWEN35B>`
+/// is the per-market compute coin that trades against the network quote dollar `Q` (DBUSDC on
+/// testnet — see docs/onramp-dbusdc-plan.md). Instantiate via `market::create_market` and stage
+/// the matching `Credit/DBUSDC` DeepBook pool with `set_deepbook_pool_id` (DEEP-gated, deferred).
+public struct M_GB10_QWEN35B has drop {}

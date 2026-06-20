@@ -38,6 +38,7 @@ use gix::config::Config;
 use gix::harness;
 use gix::job::{Self, Job};
 use gix::markets::M_H100_LLAMA8B;
+use gix::mock_usdc::MOCK_USDC;
 use gix::settlement::{Self, Treasury};
 use gix::staking::{Self, ProviderStake};
 use sui::test_scenario::{Self as ts};
@@ -136,7 +137,7 @@ fun signed_happy_path_settles() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_verified(), 2);
         assert!(job::job_output_hash(&job) == output_hash(), 3);
         ts::return_shared(job);
@@ -233,7 +234,7 @@ fun signed_sla_breach_refunds_and_slashes() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_attested(), 2);
         ts::return_shared(job);
     };
@@ -242,7 +243,7 @@ fun signed_sla_breach_refunds_and_slashes() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_refunded(), 3);
         assert!(job::job_slashed(&job) == true, 4);
         assert!(job::job_escrow_value(&job) == 0, 5);
@@ -252,7 +253,7 @@ fun signed_sla_breach_refunds_and_slashes() {
     // SLA slash = slash_bps_sla (5000 = 50%) of bond_share(BOND*QTY/CAPACITY = 1_000_000) = 500_000.
     sc.next_tx(harness::provider());
     {
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(staking::slashed_total(&stake) == 500_000, 6);
         ts::return_to_address(harness::provider(), stake);
     };
@@ -260,7 +261,7 @@ fun signed_sla_breach_refunds_and_slashes() {
     // No fee on a faulted job; consumer was refunded in full.
     sc.next_tx(harness::consumer());
     {
-        let treasury = sc.take_shared<Treasury>();
+        let treasury = sc.take_shared<Treasury<MOCK_USDC>>();
         assert!(settlement::treasury_fees_collected(&treasury) == 0, 7);
         ts::return_shared(treasury);
     };

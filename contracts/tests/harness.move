@@ -126,8 +126,8 @@ public fun provider_setup_with_key(
 
     let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let bond = mint_usdc(sc, bond_amt);
-    let mut stake = staking::stake(&cap, &cfg, bond, capacity, sc.ctx());
-    let credits = staking::mint_credits<M_H100_LLAMA8B>(
+    let mut stake = staking::stake<MOCK_USDC>(&cap, &cfg, bond, capacity, sc.ctx());
+    let credits = staking::mint_credits<M_H100_LLAMA8B, MOCK_USDC>(
         &cap,
         &mut stake,
         &cfg,
@@ -151,7 +151,7 @@ public fun provider_register_and_stake(sc: &mut Scenario, bond_amt: u64, capacit
     let cfg = sc.take_shared<Config>();
     let cap = registry::register_provider(&cfg, b"http://node", b"H100-80GB", dummy_pubkey(), sc.ctx());
     let bond = mint_usdc(sc, bond_amt);
-    let stake = staking::stake(&cap, &cfg, bond, capacity, sc.ctx());
+    let stake = staking::stake<MOCK_USDC>(&cap, &cfg, bond, capacity, sc.ctx());
     ts::return_shared(cfg);
     transfer::public_transfer(cap, provider());
     transfer::public_transfer(stake, provider());
@@ -165,9 +165,9 @@ public fun post_ask(sc: &mut Scenario, qty: u64, price_per_scu: u64): ID {
     let cfg = sc.take_shared<Config>();
     let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let cap = ts::take_from_address<ProviderCap>(sc, provider());
-    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+    let mut stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(sc, provider());
 
-    let ask_id = staking::post_ask<M_H100_LLAMA8B>(
+    let ask_id = staking::post_ask<M_H100_LLAMA8B, MOCK_USDC>(
         &cap,
         &mut stake,
         &cfg,
@@ -199,7 +199,7 @@ public fun create_job_from_ask(
     let clk = sc.take_shared<Clock>();
     let escrow = mint_usdc(sc, escrow_amt);
 
-    let job_id = job::create_job_from_ask<M_H100_LLAMA8B>(
+    let job_id = job::create_job_from_ask<M_H100_LLAMA8B, MOCK_USDC>(
         &cfg,
         &market,
         &mut ask,
@@ -253,8 +253,8 @@ public fun fill_setup_with_key(
     let cap = registry::register_provider(&cfg, b"http://node", b"H100-80GB", attest_pubkey, sc.ctx());
     let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let bond = mint_usdc(sc, bond_amt);
-    let mut stake = staking::stake(&cap, &cfg, bond, capacity, sc.ctx());
-    let credits = staking::mint_credits<M_H100_LLAMA8B>(&cap, &mut stake, &cfg, &mut market, qty, sc.ctx());
+    let mut stake = staking::stake<MOCK_USDC>(&cap, &cfg, bond, capacity, sc.ctx());
+    let credits = staking::mint_credits<M_H100_LLAMA8B, MOCK_USDC>(&cap, &mut stake, &cfg, &mut market, qty, sc.ctx());
     ts::return_shared(cfg);
     ts::return_shared(market);
     transfer::public_transfer(cap, provider());
@@ -279,7 +279,7 @@ public fun create_job_from_fill(
     let clk = sc.take_shared<Clock>();
     let credits = ts::take_from_address<Coin<Credit<M_H100_LLAMA8B>>>(sc, buyer);
 
-    let job_id = job::create_job_from_fill<M_H100_LLAMA8B>(
+    let job_id = job::create_job_from_fill<M_H100_LLAMA8B, MOCK_USDC>(
         &cfg,
         &market,
         &provider_rec,
@@ -300,12 +300,12 @@ public fun create_job_from_fill(
 /// Settle a Verified fill-job (no escrow, no payout — provider already paid at the match).
 public fun settle_fill(sc: &mut Scenario) {
     sc.next_tx(consumer());
-    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
     let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let cfg = sc.take_shared<Config>();
-    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+    let mut stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(sc, provider());
 
-    settlement::settle_fill<M_H100_LLAMA8B>(&mut job, &mut market, &cfg, &mut stake, sc.ctx());
+    settlement::settle_fill<M_H100_LLAMA8B, MOCK_USDC>(&mut job, &mut market, &cfg, &mut stake, sc.ctx());
 
     ts::return_shared(job);
     ts::return_shared(market);
@@ -316,13 +316,13 @@ public fun settle_fill(sc: &mut Scenario) {
 /// Resolve an attested-but-failing fill-job (refund the consumer in USDC from the slash).
 public fun resolve_fill(sc: &mut Scenario) {
     sc.next_tx(consumer());
-    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
     let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let cfg = sc.take_shared<Config>();
-    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
-    let mut treasury = sc.take_shared<Treasury>();
+    let mut stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(sc, provider());
+    let mut treasury = sc.take_shared<Treasury<MOCK_USDC>>();
 
-    settlement::resolve_fill<M_H100_LLAMA8B>(&mut job, &mut market, &cfg, &mut stake, &mut treasury, sc.ctx());
+    settlement::resolve_fill<M_H100_LLAMA8B, MOCK_USDC>(&mut job, &mut market, &cfg, &mut stake, &mut treasury, sc.ctx());
 
     ts::return_shared(job);
     ts::return_shared(market);
@@ -353,10 +353,10 @@ public fun create_job_with_input(
     let cfg = sc.take_shared<Config>();
     let market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let clk = sc.take_shared<Clock>();
-    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+    let mut stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(sc, provider());
     let escrow = mint_usdc(sc, price);
 
-    let job_id = job::create_job<M_H100_LLAMA8B>(
+    let job_id = job::create_job<M_H100_LLAMA8B, MOCK_USDC>(
         &cfg,
         &market,
         &mut stake,
@@ -378,9 +378,9 @@ public fun create_job_with_input(
 /// Provider acks the job.
 public fun ack(sc: &mut Scenario) {
     sc.next_tx(provider());
-    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
     let clk = sc.take_shared<Clock>();
-    job::ack<M_H100_LLAMA8B>(&mut job, &clk, sc.ctx());
+    job::ack<M_H100_LLAMA8B, MOCK_USDC>(&mut job, &clk, sc.ctx());
     ts::return_shared(job);
     ts::return_shared(clk);
 }
@@ -395,14 +395,14 @@ public fun submit_attestation(
     t_end: u64,
 ) {
     sc.next_tx(provider());
-    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
     let cfg = sc.take_shared<Config>();
     let market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let model = sc.take_shared<ModelRecord>();
     let allow = sc.take_shared<MeasurementAllowlist>();
     let clk = sc.take_shared<Clock>();
 
-    attestation::submit_mock_attestation<M_H100_LLAMA8B>(
+    attestation::submit_mock_attestation<M_H100_LLAMA8B, MOCK_USDC>(
         &mut job,
         &cfg,
         &market,
@@ -438,7 +438,7 @@ public fun submit_signed(
     signature: vector<u8>,
 ) {
     sc.next_tx(provider());
-    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
     let cfg = sc.take_shared<Config>();
     let market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let model = sc.take_shared<ModelRecord>();
@@ -446,7 +446,7 @@ public fun submit_signed(
     let provider_rec = sc.take_shared<ProviderRecord>();
     let clk = sc.take_shared<Clock>();
 
-    attestation::submit_signed_attestation<M_H100_LLAMA8B>(
+    attestation::submit_signed_attestation<M_H100_LLAMA8B, MOCK_USDC>(
         &mut job,
         &cfg,
         &market,
@@ -494,13 +494,13 @@ public fun set_clock(sc: &mut Scenario, ms: u64) {
 /// Settle a verified job. Returns nothing; assertions read from objects afterward.
 public fun settle(sc: &mut Scenario) {
     sc.next_tx(consumer());
-    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
     let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let cfg = sc.take_shared<Config>();
-    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
-    let mut treasury = sc.take_shared<Treasury>();
+    let mut stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(sc, provider());
+    let mut treasury = sc.take_shared<Treasury<MOCK_USDC>>();
 
-    settlement::settle<M_H100_LLAMA8B>(
+    settlement::settle<M_H100_LLAMA8B, MOCK_USDC>(
         &mut job,
         &mut market,
         &cfg,
@@ -519,13 +519,13 @@ public fun settle(sc: &mut Scenario) {
 /// Resolve an attested-but-failing job (invalid / SLA breach verdict).
 public fun resolve_attested(sc: &mut Scenario) {
     sc.next_tx(consumer());
-    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
     let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let cfg = sc.take_shared<Config>();
-    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
-    let mut treasury = sc.take_shared<Treasury>();
+    let mut stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(sc, provider());
+    let mut treasury = sc.take_shared<Treasury<MOCK_USDC>>();
 
-    settlement::resolve_attested<M_H100_LLAMA8B>(
+    settlement::resolve_attested<M_H100_LLAMA8B, MOCK_USDC>(
         &mut job,
         &mut market,
         &cfg,
@@ -544,14 +544,14 @@ public fun resolve_attested(sc: &mut Scenario) {
 /// Expire-and-resolve a job past a deadline.
 public fun expire_and_resolve(sc: &mut Scenario) {
     sc.next_tx(consumer());
-    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
     let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let cfg = sc.take_shared<Config>();
-    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
-    let mut treasury = sc.take_shared<Treasury>();
+    let mut stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(sc, provider());
+    let mut treasury = sc.take_shared<Treasury<MOCK_USDC>>();
     let clk = sc.take_shared<Clock>();
 
-    settlement::expire_and_resolve<M_H100_LLAMA8B>(
+    settlement::expire_and_resolve<M_H100_LLAMA8B, MOCK_USDC>(
         &mut job,
         &mut market,
         &cfg,

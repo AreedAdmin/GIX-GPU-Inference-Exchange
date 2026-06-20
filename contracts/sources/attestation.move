@@ -51,8 +51,8 @@ const ATTEST_DOMAIN: vector<u8> = b"GIX_ATTEST_V1";
 /// verdict on the Job (VALID / SLA_BREACH / INVALID). Settlement then routes off the verdict.
 ///
 /// Callable by the provider only (the party that ran the work), within `t_att`.
-public fun submit_mock_attestation<M>(
-    job: &mut Job<M>,
+public fun submit_mock_attestation<M, Q>(
+    job: &mut Job<M, Q>,
     cfg: &Config,
     market: &Market<M>,
     model: &ModelRecord,
@@ -81,7 +81,7 @@ public fun submit_mock_attestation<M>(
 
     // Compute the verdict. A non-VALID verdict still records the attestation but leaves the
     // Job non-Verified; settlement turns it into refund+slash.
-    let verdict = compute_verdict<M>(job, market, model, allow, &runtime_measurement, &output_hash, t_start, t_end);
+    let verdict = compute_verdict<M, Q>(job, market, model, allow, &runtime_measurement, &output_hash, t_start, t_end);
 
     job.record_attestation(
         runtime_measurement,
@@ -123,8 +123,8 @@ public fun submit_mock_attestation<M>(
 /// message (the signature binds the `sha2_256` `output_hash`, the verification primitive; the
 /// blob ids are storage pointers, not content hashes), so the §2 byte layout is UNCHANGED and
 /// existing node signatures stay valid. Pass `0` for either when no Walrus blob applies.
-public fun submit_signed_attestation<M>(
-    job: &mut Job<M>,
+public fun submit_signed_attestation<M, Q>(
+    job: &mut Job<M, Q>,
     cfg: &Config,
     market: &Market<M>,
     model: &ModelRecord,
@@ -177,7 +177,7 @@ public fun submit_signed_attestation<M>(
     // Same verdict engine as the mock path (measurement allowlisted, model active/match,
     // output non-empty, SLA window). A non-VALID verdict still records the attestation but
     // leaves the Job non-Verified; settlement turns it into refund+slash.
-    let verdict = compute_verdict<M>(job, market, model, allow, &runtime_measurement, &output_hash, t_start, t_end);
+    let verdict = compute_verdict<M, Q>(job, market, model, allow, &runtime_measurement, &output_hash, t_start, t_end);
 
     job.record_attestation(
         runtime_measurement,
@@ -257,8 +257,8 @@ fun u64_to_le(n: u64): vector<u8> {
 public fun sha2_256(data: vector<u8>): vector<u8> { hash::sha2_256(data) }
 
 /// Deterministic verdict computation, shared by mock (and, later, real) paths.
-fun compute_verdict<M>(
-    job: &Job<M>,
+fun compute_verdict<M, Q>(
+    job: &Job<M, Q>,
     market: &Market<M>,
     model: &ModelRecord,
     allow: &MeasurementAllowlist,
@@ -282,4 +282,4 @@ fun compute_verdict<M>(
 }
 
 /// Read-only verdict accessor for settlement/tests.
-public fun verdict<M>(job: &Job<M>): u8 { job.attestation_verdict() }
+public fun verdict<M, Q>(job: &Job<M, Q>): u8 { job.attestation_verdict() }

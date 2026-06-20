@@ -1,9 +1,11 @@
-/// The `Job<phantom M>` shared object — the atom of parallel settlement.
+/// The `Job<phantom M, phantom Q>` shared object — the atom of parallel settlement.
 ///
-/// A Job binds one consumer, one provider, one market's credits + USDC escrow, the
-/// content hashes, and the three deadlines (ack / exec / attest) copied from the market
-/// SLA at creation. Each Job is its own shared object, so two jobs settle concurrently
-/// (sui-move-contracts.md §8).
+/// A Job binds one consumer, one provider, one market's credits + `Q` escrow, the content
+/// hashes, and the three deadlines (ack / exec / attest) copied from the market SLA at
+/// creation. `M` brands the market's compute credit; `Q` is the per-network quote/settlement
+/// dollar (`MOCK_USDC` localnet, `DBUSDC` testnet, real `USDC` mainnet — see
+/// docs/onramp-dbusdc-plan.md). Each Job is its own shared object, so two jobs settle
+/// concurrently (sui-move-contracts.md §8).
 ///
 /// M1 deviation from the canonical multi-step creation: the integration contract's
 /// "stubbed match" creates the Job directly from `(provider, credits, escrow)` and
@@ -23,8 +25,6 @@ use gix::staking::{Self, ProviderStake};
 use sui::balance::{Self, Balance};
 use sui::clock::Clock;
 use sui::coin::Coin;
-
-use gix::mock_usdc::MOCK_USDC;
 
 // === Error codes (4xx: job / escrow) ===
 const EBadState: u64 = 400;
@@ -77,7 +77,7 @@ public struct AttestationRecord has store, drop {
     quote_blob_id: u256,
 }
 
-public struct Job<phantom M> has key {
+public struct Job<phantom M, phantom Q> has key {
     id: UID,
     version: u64,
     market_id: ID,
@@ -103,9 +103,9 @@ public struct Job<phantom M> has key {
     // economics
     scu_qty: u64,
     price_usdc: u64,
-    /// USDC escrow held against delivery. `some` for the M1 escrow paths; `none` for M2
+    /// `Q` escrow held against delivery. `some` for the M1 escrow paths; `none` for M2
     /// fill-jobs (the provider was paid at the DeepBook match — Option B, pay-at-match).
-    escrow: Option<Escrow>,
+    escrow: Option<Escrow<Q>>,
     reserved_credits: Balance<Credit<M>>,
     // timing (epoch ms)
     created_at: u64,
@@ -128,13 +128,13 @@ public struct Job<phantom M> has key {
 /// Asserts: market active, escrow == credits.value * (effective price implied), capacity
 /// available. The escrow amount IS the agreed price (price discovery is off-chain/stubbed
 /// in M1), so we assert `escrow == price_usdc` and that `credits.value == scu_qty`.
-public fun create_job<M>(
+public fun create_job<M, Q>(
     cfg: &Config,
     market: &Market<M>,
-    stake: &mut ProviderStake,
+    stake: &mut ProviderStake<Q>,
     provider: address,
     credits: Coin<Credit<M>>,
-    escrow_in: Coin<MOCK_USDC>,
+    escrow_in: Coin<Q>,
     input_hash: vector<u8>,
     clk: &Clock,
     ctx: &mut TxContext,
@@ -152,7 +152,7 @@ public fun create_job<M>(
     // Reserve provider capacity for this in-flight job (bounds concurrent exposure).
     staking::reserve(stake, scu_qty);
 
-    build_and_share<M>(
+    build_and_share<M, Q>(
         cfg,
         market,
         provider,
@@ -193,7 +193,7 @@ public fun create_job<M>(
 /// proving the credit provenance) is **DEFERRED** — see INTERFACE.md "DEFERRED".
 ///
 /// Requires the market to have a bound DeepBook pool (`assert_has_deepbook_pool`).
-public fun create_job_from_fill<M>(
+public fun create_job_from_fill<M, Q>(
     cfg: &Config,
     market: &Market<M>,
     provider_rec: &ProviderRecord,
@@ -229,14 +229,14 @@ public fun create_job_from_fill<M>(
     // SCU quantity as the per-job exposure unit, consistent with `bond_share`'s qty weighting.)
     let price_usdc = scu_qty;
 
-    build_and_share<M>(
+    build_and_share<M, Q>(
         cfg,
         market,
         provider,
         ctx.sender(),
         credit::from_coin(credits),
         scu_qty,
-        option::none(), // Option B: no USDC escrow — provider already paid at the fill.
+        option::none<Escrow<Q>>(), // Option B: no Q escrow — provider already paid at the fill.
         price_usdc,
         true, // fill-job
         input_hash,
@@ -266,12 +266,12 @@ public fun create_job_from_fill<M>(
 /// provider signs with its own stake; `consume_minted` retires the minted SCU and `release`
 /// is a tolerant no-op. Settlement therefore pays `ask.provider` (and, on fault, slashes the
 /// provider's bond) entirely through the existing provider-signed paths.
-public fun create_job_from_ask<M>(
+public fun create_job_from_ask<M, Q>(
     cfg: &Config,
     market: &Market<M>,
     ask: &mut Ask<M>,
     qty_scu: u64,
-    escrow_in: Coin<MOCK_USDC>,
+    escrow_in: Coin<Q>,
     input_hash: vector<u8>,
     clk: &Clock,
     ctx: &mut TxContext,
@@ -290,7 +290,7 @@ public fun create_job_from_ask<M>(
     let provider = ask::provider<M>(ask);
     let credits = ask::draw<M>(ask, qty_scu);
 
-    build_and_share<M>(
+    build_and_share<M, Q>(
         cfg,
         market,
         provider,
@@ -312,14 +312,14 @@ public fun create_job_from_ask<M>(
 /// by the owned-credits path (`create_job`), the order-book path (`create_job_from_ask`), and
 /// the DeepBook fill path (`create_job_from_fill`). `escrow_opt` is `some` for the escrow
 /// paths and `none` for fill-jobs (Option B — provider already paid at the match).
-fun build_and_share<M>(
+fun build_and_share<M, Q>(
     cfg: &Config,
     market: &Market<M>,
     provider: address,
     consumer: address,
     credits: Balance<Credit<M>>,
     scu_qty: u64,
-    escrow_opt: Option<Escrow>,
+    escrow_opt: Option<Escrow<Q>>,
     price_usdc: u64,
     is_fill: bool,
     input_hash: vector<u8>,
@@ -328,7 +328,7 @@ fun build_and_share<M>(
     ctx: &mut TxContext,
 ): ID {
     let now = clk.timestamp_ms();
-    let job = Job<M> {
+    let job = Job<M, Q> {
         id: object::new(ctx),
         version: cfg.version(),
         market_id: market.market_id(),
@@ -362,7 +362,7 @@ fun build_and_share<M>(
 
 /// Provider acknowledges dispatch within `t_ack`, moving the job to `Executing`. Anyone
 /// else attempting to ack aborts; re-acking is idempotent (no-op) (lifecycle §7).
-public fun ack<M>(job: &mut Job<M>, clk: &Clock, ctx: &TxContext) {
+public fun ack<M, Q>(job: &mut Job<M, Q>, clk: &Clock, ctx: &TxContext) {
     assert!(ctx.sender() == job.provider, EWrongProvider);
     assert!(job.state == STATE_DISPATCHED || job.state == STATE_EXECUTING, EBadState);
     if (job.state == STATE_EXECUTING) { return };
@@ -373,33 +373,33 @@ public fun ack<M>(job: &mut Job<M>, clk: &Clock, ctx: &TxContext) {
 
 // === Package-internal accessors / mutators (attestation, settlement) ===
 
-public(package) fun state<M>(job: &Job<M>): u8 { job.state }
-public(package) fun consumer<M>(job: &Job<M>): address { job.consumer }
-public(package) fun provider<M>(job: &Job<M>): address { job.provider }
-public(package) fun market_id<M>(job: &Job<M>): ID { job.market_id }
-public(package) fun model_id<M>(job: &Job<M>): ID { job.model_id }
-public(package) fun scu_qty<M>(job: &Job<M>): u64 { job.scu_qty }
-public(package) fun price_usdc<M>(job: &Job<M>): u64 { job.price_usdc }
-public(package) fun input_hash<M>(job: &Job<M>): vector<u8> { job.input_hash }
-public(package) fun attest_deadline<M>(job: &Job<M>): u64 { job.attest_deadline }
-public(package) fun exec_deadline<M>(job: &Job<M>): u64 { job.exec_deadline }
-public(package) fun ack_deadline<M>(job: &Job<M>): u64 { job.ack_deadline }
-public(package) fun is_acked<M>(job: &Job<M>): bool { job.acked }
-public(package) fun is_terminal<M>(job: &Job<M>): bool {
+public(package) fun state<M, Q>(job: &Job<M, Q>): u8 { job.state }
+public(package) fun consumer<M, Q>(job: &Job<M, Q>): address { job.consumer }
+public(package) fun provider<M, Q>(job: &Job<M, Q>): address { job.provider }
+public(package) fun market_id<M, Q>(job: &Job<M, Q>): ID { job.market_id }
+public(package) fun model_id<M, Q>(job: &Job<M, Q>): ID { job.model_id }
+public(package) fun scu_qty<M, Q>(job: &Job<M, Q>): u64 { job.scu_qty }
+public(package) fun price_usdc<M, Q>(job: &Job<M, Q>): u64 { job.price_usdc }
+public(package) fun input_hash<M, Q>(job: &Job<M, Q>): vector<u8> { job.input_hash }
+public(package) fun attest_deadline<M, Q>(job: &Job<M, Q>): u64 { job.attest_deadline }
+public(package) fun exec_deadline<M, Q>(job: &Job<M, Q>): u64 { job.exec_deadline }
+public(package) fun ack_deadline<M, Q>(job: &Job<M, Q>): u64 { job.ack_deadline }
+public(package) fun is_acked<M, Q>(job: &Job<M, Q>): bool { job.acked }
+public(package) fun is_terminal<M, Q>(job: &Job<M, Q>): bool {
     job.state == STATE_SETTLED || job.state == STATE_REFUNDED || job.state == STATE_EXPIRED
 }
 
-/// Whether this job carries a USDC escrow (M1 escrow paths) vs. is a fill-job (Option B —
+/// Whether this job carries a `Q` escrow (M1 escrow paths) vs. is a fill-job (Option B —
 /// no escrow, provider paid at the DeepBook match).
-public(package) fun has_escrow<M>(job: &Job<M>): bool { option::is_some(&job.escrow) }
-public(package) fun is_fill<M>(job: &Job<M>): bool { job.is_fill }
+public(package) fun has_escrow<M, Q>(job: &Job<M, Q>): bool { option::is_some(&job.escrow) }
+public(package) fun is_fill<M, Q>(job: &Job<M, Q>): bool { job.is_fill }
 
-public(package) fun escrow_mut<M>(job: &mut Job<M>): &mut Escrow { option::borrow_mut(&mut job.escrow) }
-public(package) fun escrow_ref<M>(job: &Job<M>): &Escrow { option::borrow(&job.escrow) }
+public(package) fun escrow_mut<M, Q>(job: &mut Job<M, Q>): &mut Escrow<Q> { option::borrow_mut(&mut job.escrow) }
+public(package) fun escrow_ref<M, Q>(job: &Job<M, Q>): &Escrow<Q> { option::borrow(&job.escrow) }
 
 /// Take the reserved credit balance out of the Job (settlement burns it; refund returns
 /// it to the provider). Leaves a zero balance in its place.
-public(package) fun take_reserved_credits<M>(job: &mut Job<M>): Balance<Credit<M>> {
+public(package) fun take_reserved_credits<M, Q>(job: &mut Job<M, Q>): Balance<Credit<M>> {
     balance::withdraw_all(&mut job.reserved_credits)
 }
 
@@ -407,11 +407,11 @@ public(package) fun take_reserved_credits<M>(job: &mut Job<M>): Balance<Credit<M
 /// funds (leaving an empty, still-present escrow as the M1 paths do). For a fill-job there
 /// is NO escrow, so this returns a zero balance — settlement therefore moves no USDC out of
 /// a fill-job on the happy path (the provider was already paid at the DeepBook match).
-public(package) fun take_escrow_funds<M>(job: &mut Job<M>): Balance<MOCK_USDC> {
+public(package) fun take_escrow_funds<M, Q>(job: &mut Job<M, Q>): Balance<Q> {
     if (option::is_some(&job.escrow)) {
         escrow::withdraw_all(option::borrow_mut(&mut job.escrow))
     } else {
-        balance::zero<MOCK_USDC>()
+        balance::zero<Q>()
     }
 }
 
@@ -422,8 +422,8 @@ public(package) fun take_escrow_funds<M>(job: &mut Job<M>): Balance<MOCK_USDC> {
 /// `quote_blob_id` the Walrus blob id of the signed attestation quote — both COMMITMENTS,
 /// stored alongside the `output_hash` (`sha2_256`) verification primitive, not in place of
 /// it. Pass `0` for either when there is no Walrus blob (e.g. the localnet mock path).
-public(package) fun record_attestation<M>(
-    job: &mut Job<M>,
+public(package) fun record_attestation<M, Q>(
+    job: &mut Job<M, Q>,
     measurement: vector<u8>,
     output_hash: vector<u8>,
     output_token_count: u64,
@@ -454,12 +454,12 @@ public(package) fun record_attestation<M>(
     };
 }
 
-public(package) fun set_state_settled<M>(job: &mut Job<M>) { job.state = STATE_SETTLED; }
-public(package) fun set_state_refunded<M>(job: &mut Job<M>) { job.state = STATE_REFUNDED; }
-public(package) fun set_state_expired<M>(job: &mut Job<M>) { job.state = STATE_EXPIRED; }
-public(package) fun set_slashed<M>(job: &mut Job<M>) { job.slashed = true; }
+public(package) fun set_state_settled<M, Q>(job: &mut Job<M, Q>) { job.state = STATE_SETTLED; }
+public(package) fun set_state_refunded<M, Q>(job: &mut Job<M, Q>) { job.state = STATE_REFUNDED; }
+public(package) fun set_state_expired<M, Q>(job: &mut Job<M, Q>) { job.state = STATE_EXPIRED; }
+public(package) fun set_slashed<M, Q>(job: &mut Job<M, Q>) { job.slashed = true; }
 
-public(package) fun attestation_verdict<M>(job: &Job<M>): u8 {
+public(package) fun attestation_verdict<M, Q>(job: &Job<M, Q>): u8 {
     if (option::is_some(&job.attestation)) {
         option::borrow(&job.attestation).verdict
     } else {
@@ -467,29 +467,29 @@ public(package) fun attestation_verdict<M>(job: &Job<M>): u8 {
     }
 }
 
-public(package) fun has_attestation<M>(job: &Job<M>): bool { option::is_some(&job.attestation) }
-public(package) fun output_hash<M>(job: &Job<M>): vector<u8> { job.output_hash }
+public(package) fun has_attestation<M, Q>(job: &Job<M, Q>): bool { option::is_some(&job.attestation) }
+public(package) fun output_hash<M, Q>(job: &Job<M, Q>): vector<u8> { job.output_hash }
 
 // === Public reads ===
 
-public fun job_state<M>(job: &Job<M>): u8 { job.state }
-public fun job_consumer<M>(job: &Job<M>): address { job.consumer }
-public fun job_provider<M>(job: &Job<M>): address { job.provider }
-public fun job_price<M>(job: &Job<M>): u64 { job.price_usdc }
-public fun job_qty<M>(job: &Job<M>): u64 { job.scu_qty }
-public fun job_slashed<M>(job: &Job<M>): bool { job.slashed }
+public fun job_state<M, Q>(job: &Job<M, Q>): u8 { job.state }
+public fun job_consumer<M, Q>(job: &Job<M, Q>): address { job.consumer }
+public fun job_provider<M, Q>(job: &Job<M, Q>): address { job.provider }
+public fun job_price<M, Q>(job: &Job<M, Q>): u64 { job.price_usdc }
+public fun job_qty<M, Q>(job: &Job<M, Q>): u64 { job.scu_qty }
+public fun job_slashed<M, Q>(job: &Job<M, Q>): bool { job.slashed }
 /// Escrow value held by the job; `0` for a fill-job (Option B — no escrow).
-public fun job_escrow_value<M>(job: &Job<M>): u64 {
+public fun job_escrow_value<M, Q>(job: &Job<M, Q>): u64 {
     if (option::is_some(&job.escrow)) escrow::value(option::borrow(&job.escrow)) else 0
 }
-public fun job_output_hash<M>(job: &Job<M>): vector<u8> { job.output_hash }
+public fun job_output_hash<M, Q>(job: &Job<M, Q>): vector<u8> { job.output_hash }
 /// Whether this is a DeepBook fill-job (Option B — no escrow, provider paid at the match).
-public fun job_is_fill<M>(job: &Job<M>): bool { job.is_fill }
+public fun job_is_fill<M, Q>(job: &Job<M, Q>): bool { job.is_fill }
 /// Walrus blob id COMMITMENTS (not content hashes). `0` = none recorded.
-public fun job_input_blob_id<M>(job: &Job<M>): u256 { job.input_blob_id }
-public fun job_output_blob_id<M>(job: &Job<M>): u256 { job.output_blob_id }
+public fun job_input_blob_id<M, Q>(job: &Job<M, Q>): u256 { job.input_blob_id }
+public fun job_output_blob_id<M, Q>(job: &Job<M, Q>): u256 { job.output_blob_id }
 /// Walrus blob id of the attestation quote, if attested; `0` otherwise.
-public fun job_quote_blob_id<M>(job: &Job<M>): u256 {
+public fun job_quote_blob_id<M, Q>(job: &Job<M, Q>): u256 {
     if (option::is_some(&job.attestation)) option::borrow(&job.attestation).quote_blob_id else 0
 }
 

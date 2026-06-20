@@ -39,8 +39,6 @@ use sui::balance::{Self, Balance};
 use sui::clock::Clock;
 use sui::coin;
 
-use gix::mock_usdc::MOCK_USDC;
-
 // === Error codes (4xx: job / settlement) ===
 const EBadState: u64 = 400;
 const ENotVerified: u64 = 402;
@@ -49,20 +47,44 @@ const EWrongConsumer: u64 = 404;
 /// Called an escrow path on a fill-job, or a fill path on an escrow job.
 const EWrongJobKind: u64 = 409;
 
-/// Protocol fee sink + treasury-funded backstop pool (B3 nominal). Shared so any
-/// settlement can deposit into it; only the AdminCap can withdraw.
-public struct Treasury has key {
+/// Protocol fee sink + treasury-funded backstop pool (B3 nominal), denominated in the
+/// per-network quote dollar `Q` (`MOCK_USDC` localnet, `DBUSDC` testnet, real `USDC` mainnet —
+/// see docs/onramp-dbusdc-plan.md). Shared so any settlement can deposit into it; only the
+/// AdminCap can withdraw. The treasury is published once per `Q` at deploy time (via
+/// `init_treasury`), so a republish that switches `Q` shares a fresh treasury for that dollar.
+public struct Treasury<phantom Q> has key {
     id: UID,
     version: u64,
-    funds: Balance<MOCK_USDC>,
+    funds: Balance<Q>,
     fees_collected: u64,
     slash_collected: u64,
 }
 
 const VERSION: u64 = 1;
 
+/// Publish a `Treasury<Q>` for the network's quote dollar. AdminCap-gated so a deploy can pick
+/// the dollar (`MOCK_USDC` / `DBUSDC` / `USDC`) by the `Q` type-arg at the call. The package
+/// `init` seeds the localnet `MOCK_USDC` treasury automatically (`init` cannot take type args);
+/// non-localnet deploys call `init_treasury<DBUSDC>` / `init_treasury<USDC>` once after publish.
+public fun init_treasury<Q>(_: &gix::config::AdminCap, ctx: &mut TxContext): ID {
+    let treasury = Treasury<Q> {
+        id: object::new(ctx),
+        version: VERSION,
+        funds: balance::zero<Q>(),
+        fees_collected: 0,
+        slash_collected: 0,
+    };
+    let id = object::id(&treasury);
+    transfer::share_object(treasury);
+    id
+}
+
+/// Package `init`: seed the default localnet `MOCK_USDC` treasury so the localnet flow is
+/// unchanged (it always settled in `MOCK_USDC`). A republish targeting testnet/mainnet still
+/// gets this `MOCK_USDC` treasury for free, but ALSO calls `init_treasury<DBUSDC>` (or
+/// `<USDC>`) once to publish the treasury that network actually settles in.
 fun init(ctx: &mut TxContext) {
-    transfer::share_object(Treasury {
+    transfer::share_object(Treasury<gix::mock_usdc::MOCK_USDC> {
         id: object::new(ctx),
         version: VERSION,
         funds: balance::zero(),
@@ -76,12 +98,12 @@ fun init(ctx: &mut TxContext) {
 /// Settle a Verified ESCROW job: pay provider `price − fee`, fee → treasury, burn the
 /// reserved credits (capacity consumed), release the reservation. Callable by anyone.
 /// Aborts `EWrongJobKind` on a fill-job (use `settle_fill`).
-public fun settle<M>(
-    job: &mut Job<M>,
+public fun settle<M, Q>(
+    job: &mut Job<M, Q>,
     market: &mut Market<M>,
     cfg: &Config,
-    stake: &mut ProviderStake,
-    treasury: &mut Treasury,
+    stake: &mut ProviderStake<Q>,
+    treasury: &mut Treasury<Q>,
     ctx: &mut TxContext,
 ) {
     cfg.assert_version();
@@ -94,7 +116,7 @@ public fun settle<M>(
     let provider = job.provider();
 
     // Drain escrow, split fee, pay provider.
-    let mut funds = job.take_escrow_funds();
+    let mut funds: Balance<Q> = job.take_escrow_funds();
     let fee_bps = market.effective_fee_bps(cfg);
     let fee = ((price as u128) * (fee_bps as u128) / (gix::config::bps_denom() as u128)) as u64;
     let fee_bal = funds.split(fee);
@@ -120,11 +142,11 @@ public fun settle<M>(
 /// the reserved credit (capacity consumed) and retires the minted SCU, then marks Settled.
 /// Emits `Settled` with `payout = 0, fee = 0` (the on-chain settlement moves no USDC).
 /// Aborts `EWrongJobKind` on an escrow job (use `settle`). Callable by anyone.
-public fun settle_fill<M>(
-    job: &mut Job<M>,
+public fun settle_fill<M, Q>(
+    job: &mut Job<M, Q>,
     market: &mut Market<M>,
     cfg: &Config,
-    stake: &mut ProviderStake,
+    stake: &mut ProviderStake<Q>,
     ctx: &mut TxContext,
 ) {
     cfg.assert_version();
@@ -156,12 +178,12 @@ public fun settle_fill<M>(
 /// Resolve an ESCROW job that was attested but whose verdict is non-VALID (invalid binding or
 /// SLA breach): refund the consumer in full and slash the provider per the fault class.
 /// Aborts `EWrongJobKind` on a fill-job (use `resolve_fill`).
-public fun resolve_attested<M>(
-    job: &mut Job<M>,
+public fun resolve_attested<M, Q>(
+    job: &mut Job<M, Q>,
     market: &mut Market<M>,
     cfg: &Config,
-    stake: &mut ProviderStake,
-    treasury: &mut Treasury,
+    stake: &mut ProviderStake<Q>,
+    treasury: &mut Treasury<Q>,
     ctx: &mut TxContext,
 ) {
     cfg.assert_version();
@@ -187,12 +209,12 @@ public fun resolve_attested<M>(
 /// compensates the consumer up to the job's value-at-risk, remainder to treasury. Shares the
 /// `refund_and_slash` machinery (which drains a zero escrow for a fill-job). Aborts
 /// `EWrongJobKind` on an escrow job (use `resolve_attested`).
-public fun resolve_fill<M>(
-    job: &mut Job<M>,
+public fun resolve_fill<M, Q>(
+    job: &mut Job<M, Q>,
     market: &mut Market<M>,
     cfg: &Config,
-    stake: &mut ProviderStake,
-    treasury: &mut Treasury,
+    stake: &mut ProviderStake<Q>,
+    treasury: &mut Treasury<Q>,
     ctx: &mut TxContext,
 ) {
     cfg.assert_version();
@@ -218,12 +240,12 @@ public fun resolve_fill<M>(
 /// - never acked & past `ack_deadline`  → liveness fault (AckTimeout)
 /// - acked, no attestation, past `attest_deadline` → missing attestation (AttTimeout)
 /// - acked, no attestation, past `exec_deadline`   → SLA overrun (SlaOverrun)
-public fun expire_and_resolve<M>(
-    job: &mut Job<M>,
+public fun expire_and_resolve<M, Q>(
+    job: &mut Job<M, Q>,
     market: &mut Market<M>,
     cfg: &Config,
-    stake: &mut ProviderStake,
-    treasury: &mut Treasury,
+    stake: &mut ProviderStake<Q>,
+    treasury: &mut Treasury<Q>,
     clk: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -258,10 +280,10 @@ public fun expire_and_resolve<M>(
 
 /// Consumer cancels before the provider acked. No provider fault ⇒ no slash. Full refund,
 /// reserved credits returned to the provider, reservation released.
-public fun cancel<M>(
-    job: &mut Job<M>,
+public fun cancel<M, Q>(
+    job: &mut Job<M, Q>,
     cfg: &Config,
-    stake: &mut ProviderStake,
+    stake: &mut ProviderStake<Q>,
     ctx: &mut TxContext,
 ) {
     cfg.assert_version();
@@ -286,7 +308,7 @@ public fun cancel<M>(
     };
 
     // Return reserved credits to the provider to re-sell (un-reserved, not burned).
-    return_credits_to_provider<M>(job, provider, ctx);
+    return_credits_to_provider<M, Q>(job, provider, ctx);
     staking::release(stake, qty);
 
     job.set_state_refunded();
@@ -297,12 +319,12 @@ public fun cancel<M>(
 
 /// Full refund to the consumer + slash the provider per `fault`, distributing the penalty
 /// per D1 (consumer comp up to job value → treasury). Returns reserved credits to provider.
-fun refund_and_slash<M>(
-    job: &mut Job<M>,
+fun refund_and_slash<M, Q>(
+    job: &mut Job<M, Q>,
     market: &Market<M>,
     cfg: &Config,
-    stake: &mut ProviderStake,
-    treasury: &mut Treasury,
+    stake: &mut ProviderStake<Q>,
+    treasury: &mut Treasury<Q>,
     fault: u8,
     reason: u8,
     ctx: &mut TxContext,
@@ -315,7 +337,7 @@ fun refund_and_slash<M>(
     // 1. Refund the escrow to the consumer FIRST and unconditionally. For a FILL job there is
     //    no escrow (Option B), so this is a zero refund and the consumer's whole compensation
     //    comes from the slash in step 2.
-    let funds = job.take_escrow_funds();
+    let funds: Balance<Q> = job.take_escrow_funds();
     let refund_amount = balance::value(&funds);
     if (refund_amount > 0) {
         transfer::public_transfer(coin::from_balance(funds, ctx), consumer);
@@ -325,7 +347,7 @@ fun refund_and_slash<M>(
 
     // 2. Slash the provider's bond and distribute (D1: consumer comp up to job value,
     //    remainder to treasury, burn = 0).
-    let mut penalty = slashing::execute(cfg, stake, qty, fault);
+    let mut penalty: Balance<Q> = slashing::execute(cfg, stake, qty, fault);
     let penalty_total = balance::value(&penalty);
     let to_consumer = if (penalty_total > price) price else penalty_total;
     if (to_consumer > 0) {
@@ -337,7 +359,7 @@ fun refund_and_slash<M>(
 
     // 3. Return reserved credits to the provider (capacity preserved on failure).
     let _ = market; // market kept in signature for symmetry / future fee-on-fault use
-    return_credits_to_provider<M>(job, provider, ctx);
+    return_credits_to_provider<M, Q>(job, provider, ctx);
     staking::release(stake, qty);
 
     // 4. Terminal annotations.
@@ -349,7 +371,7 @@ fun refund_and_slash<M>(
 
 /// Hand the Job's reserved credit balance back to the provider as a `Coin` (un-reserved,
 /// not burned) so they can re-sell the capacity.
-fun return_credits_to_provider<M>(job: &mut Job<M>, provider: address, ctx: &mut TxContext) {
+fun return_credits_to_provider<M, Q>(job: &mut Job<M, Q>, provider: address, ctx: &mut TxContext) {
     let credits: Balance<Credit<M>> = job.take_reserved_credits();
     if (balance::value(&credits) > 0) {
         transfer::public_transfer(coin::from_balance(credits, ctx), provider);
@@ -358,26 +380,26 @@ fun return_credits_to_provider<M>(job: &mut Job<M>, provider: address, ctx: &mut
     }
 }
 
-fun deposit_fee(treasury: &mut Treasury, fee: Balance<MOCK_USDC>) {
+fun deposit_fee<Q>(treasury: &mut Treasury<Q>, fee: Balance<Q>) {
     treasury.fees_collected = treasury.fees_collected + balance::value(&fee);
     treasury.funds.join(fee);
 }
 
-fun deposit_slash(treasury: &mut Treasury, slash: Balance<MOCK_USDC>) {
+fun deposit_slash<Q>(treasury: &mut Treasury<Q>, slash: Balance<Q>) {
     treasury.slash_collected = treasury.slash_collected + balance::value(&slash);
     treasury.funds.join(slash);
 }
 
 // === Treasury reads / admin ===
 
-public fun treasury_balance(t: &Treasury): u64 { balance::value(&t.funds) }
-public fun treasury_fees_collected(t: &Treasury): u64 { t.fees_collected }
-public fun treasury_slash_collected(t: &Treasury): u64 { t.slash_collected }
+public fun treasury_balance<Q>(t: &Treasury<Q>): u64 { balance::value(&t.funds) }
+public fun treasury_fees_collected<Q>(t: &Treasury<Q>): u64 { t.fees_collected }
+public fun treasury_slash_collected<Q>(t: &Treasury<Q>): u64 { t.slash_collected }
 
 /// AdminCap-gated withdrawal of treasury funds.
-public fun withdraw_treasury(
+public fun withdraw_treasury<Q>(
     _: &gix::config::AdminCap,
-    treasury: &mut Treasury,
+    treasury: &mut Treasury<Q>,
     amount: u64,
     recipient: address,
     ctx: &mut TxContext,

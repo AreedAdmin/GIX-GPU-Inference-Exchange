@@ -13,6 +13,7 @@ use gix::config::Config;
 use gix::harness;
 use gix::job::{Self, Job};
 use gix::markets::M_H100_LLAMA8B;
+use gix::mock_usdc::MOCK_USDC;
 use gix::settlement::{Self, Treasury};
 use gix::staking::{Self, ProviderStake};
 use sui::test_scenario::{Self as ts};
@@ -38,7 +39,7 @@ fun happy_path_settles_and_pays_provider() {
     // Assert Verified before settle.
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_verified(), 1);
         ts::return_shared(job);
     };
@@ -48,9 +49,9 @@ fun happy_path_settles_and_pays_provider() {
     // Provider received price − fee; treasury got fee; job Settled; credits burned.
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         let cfg = sc.take_shared<Config>();
-        let treasury = sc.take_shared<Treasury>();
+        let treasury = sc.take_shared<Treasury<MOCK_USDC>>();
         let fee = cfg.fee_amount(PRICE);
         assert!(job::job_state(&job) == job::s_settled(), 2);
         assert!(job::job_slashed(&job) == false, 3);
@@ -76,7 +77,7 @@ fun happy_path_settles_and_pays_provider() {
     // Provider stake: minted consumed, reservation released.
     sc.next_tx(harness::provider());
     {
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(staking::reserved_scu(&stake) == 0, 8);
         assert!(staking::minted_scu(&stake) == 0, 9); // QTY minted then consumed
         ts::return_to_address(harness::provider(), stake);
@@ -102,7 +103,7 @@ fun invalid_attestation_refunds_and_slashes() {
     // Job is Attested with an INVALID verdict (not Verified).
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_attested(), 1);
         ts::return_shared(job);
     };
@@ -111,7 +112,7 @@ fun invalid_attestation_refunds_and_slashes() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_refunded(), 2);
         assert!(job::job_slashed(&job) == true, 3);
         assert!(job::job_escrow_value(&job) == 0, 4);
@@ -124,7 +125,7 @@ fun invalid_attestation_refunds_and_slashes() {
     // consumer, treasury slash = 0. Consumer ends with refund + comp = 2 * PRICE across coins.
     sc.next_tx(harness::consumer());
     {
-        let treasury = sc.take_shared<Treasury>();
+        let treasury = sc.take_shared<Treasury<MOCK_USDC>>();
         assert!(settlement::treasury_slash_collected(&treasury) == 0, 5);
         // No fee on a faulted job.
         assert!(settlement::treasury_fees_collected(&treasury) == 0, 6);
@@ -134,7 +135,7 @@ fun invalid_attestation_refunds_and_slashes() {
     // Provider's bond was debited by the slash; capacity de-rated.
     sc.next_tx(harness::provider());
     {
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(staking::slashed_total(&stake) == 1_000_000, 7);
         assert!(staking::bond_value(&stake) == BOND - 1_000_000, 8);
         // de-rated by 10% of 100 = 90.
@@ -163,7 +164,7 @@ fun sla_breach_verdict_refunds_and_slashes() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_refunded(), 1);
         assert!(job::job_slashed(&job) == true, 2);
         ts::return_shared(job);
@@ -172,7 +173,7 @@ fun sla_breach_verdict_refunds_and_slashes() {
     // SLA slash is graded: slash_bps_sla = 5000 (50%) of bond_share(1_000_000) = 500_000.
     sc.next_tx(harness::provider());
     {
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(staking::slashed_total(&stake) == 500_000, 3);
         ts::return_to_address(harness::provider(), stake);
     };
@@ -196,7 +197,7 @@ fun missing_attestation_refunds_and_slashes() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_refunded(), 1);
         assert!(job::job_slashed(&job) == true, 2);
         ts::return_shared(job);
@@ -205,7 +206,7 @@ fun missing_attestation_refunds_and_slashes() {
     // Missing = 100% of bond share = 1_000_000.
     sc.next_tx(harness::provider());
     {
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(staking::slashed_total(&stake) == 1_000_000, 3);
         ts::return_to_address(harness::provider(), stake);
     };
@@ -228,7 +229,7 @@ fun no_ack_liveness_slash() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_refunded(), 1);
         assert!(job::job_slashed(&job) == true, 2);
         ts::return_shared(job);
@@ -237,7 +238,7 @@ fun no_ack_liveness_slash() {
     // Liveness = slash_bps_liveness (300 = 3%) of bond_share(1_000_000) = 30_000.
     sc.next_tx(harness::provider());
     {
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(staking::slashed_total(&stake) == 30_000, 3);
         ts::return_to_address(harness::provider(), stake);
     };
@@ -257,10 +258,10 @@ fun consumer_cancel_no_slash() {
     // Consumer cancels pre-ack.
     sc.next_tx(harness::consumer());
     {
-        let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         let cfg = sc.take_shared<Config>();
-        let mut stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
-        settlement::cancel<M_H100_LLAMA8B>(&mut job, &cfg, &mut stake, sc.ctx());
+        let mut stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
+        settlement::cancel<M_H100_LLAMA8B, MOCK_USDC>(&mut job, &cfg, &mut stake, sc.ctx());
         assert!(job::job_state(&job) == job::s_refunded(), 1);
         assert!(job::job_slashed(&job) == false, 2);
         ts::return_shared(job);
@@ -271,7 +272,7 @@ fun consumer_cancel_no_slash() {
     // No slash.
     sc.next_tx(harness::provider());
     {
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(staking::slashed_total(&stake) == 0, 3);
         assert!(staking::reserved_scu(&stake) == 0, 4);
         assert!(staking::bond_value(&stake) == BOND, 5);

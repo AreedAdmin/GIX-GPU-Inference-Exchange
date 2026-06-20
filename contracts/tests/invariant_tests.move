@@ -12,6 +12,7 @@ use gix::harness;
 use gix::job::{Self, Job};
 use gix::market::{Self, Market};
 use gix::markets::M_H100_LLAMA8B;
+use gix::mock_usdc::MOCK_USDC;
 use gix::registry::{Self, MeasurementAllowlist};
 use gix::settlement::{Self, Treasury};
 use gix::staking::{Self, ProviderStake};
@@ -68,7 +69,7 @@ fun cannot_mint_beyond_capacity() {
     let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
     let bond = harness::mint_usdc(&mut sc, BOND);
     let mut stake = staking::stake(&cap, &cfg, bond, 10, sc.ctx());
-    let credits = staking::mint_credits<M_H100_LLAMA8B>(&cap, &mut stake, &cfg, &mut market, 11, sc.ctx());
+    let credits = staking::mint_credits<M_H100_LLAMA8B, MOCK_USDC>(&cap, &mut stake, &cfg, &mut market, 11, sc.ctx());
     // unreachable; cleanup for the type checker.
     transfer::public_transfer(credits, harness::provider());
     ts::return_shared(cfg);
@@ -179,9 +180,9 @@ fun wrong_party_cannot_ack() {
     // Consumer (not provider) tries to ack.
     sc.next_tx(harness::consumer());
     {
-        let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let mut job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         let clk = sc.take_shared<sui::clock::Clock>();
-        job::ack<M_H100_LLAMA8B>(&mut job, &clk, sc.ctx());
+        job::ack<M_H100_LLAMA8B, MOCK_USDC>(&mut job, &clk, sc.ctx());
         ts::return_shared(job);
         ts::return_shared(clk);
     };
@@ -203,7 +204,7 @@ fun escrow_conservation_on_settle() {
     sc.next_tx(harness::provider());
     {
         let cfg = sc.take_shared<Config>();
-        let treasury = sc.take_shared<Treasury>();
+        let treasury = sc.take_shared<Treasury<MOCK_USDC>>();
         let payout = harness::take_usdc(&mut sc, harness::provider());
         let fee = cfg.fee_amount(PRICE);
         // I1 + §9.2: payout + fee == escrow == PRICE.

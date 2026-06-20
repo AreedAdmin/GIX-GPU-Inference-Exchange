@@ -23,6 +23,7 @@ use gix::config::Config;
 use gix::harness;
 use gix::job::{Self, Job};
 use gix::markets::M_H100_LLAMA8B;
+use gix::mock_usdc::MOCK_USDC;
 use gix::settlement::{Self, Treasury};
 use gix::staking::{Self, ProviderStake};
 use sui::test_scenario::{Self as ts};
@@ -62,7 +63,7 @@ fun two_account_ask_settles_and_pays_provider() {
     // Job is bound to the provider as seller, consumer2 as buyer; ask drained by QTY.
     sc.next_tx(harness::consumer2());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         let ask = sc.take_shared<Ask<M_H100_LLAMA8B>>();
         assert!(job::job_provider(&job) == harness::provider(), 4);
         assert!(job::job_consumer(&job) == harness::consumer2(), 5);
@@ -83,7 +84,7 @@ fun two_account_ask_settles_and_pays_provider() {
     sc.next_tx(harness::admin());
     {
         let cfg = sc.take_shared<Config>();
-        let treasury = sc.take_shared<Treasury>();
+        let treasury = sc.take_shared<Treasury<MOCK_USDC>>();
         let fee = cfg.fee_amount(ESCROW);
         assert!(settlement::treasury_balance(&treasury) == fee, 10);
         ts::return_shared(cfg);
@@ -102,8 +103,8 @@ fun two_account_ask_settles_and_pays_provider() {
     // Job terminal; minted SCU consumed, no dangling reservation.
     sc.next_tx(harness::provider());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(job::job_state(&job) == job::s_settled(), 12);
         assert!(staking::minted_scu(&stake) == 0, 13); // QTY minted at post_ask, consumed at settle
         assert!(staking::reserved_scu(&stake) == 0, 14);
@@ -130,7 +131,7 @@ fun ask_escrow_conservation_on_settle() {
     sc.next_tx(harness::provider());
     {
         let cfg = sc.take_shared<Config>();
-        let treasury = sc.take_shared<Treasury>();
+        let treasury = sc.take_shared<Treasury<MOCK_USDC>>();
         let payout = harness::take_usdc(&mut sc, harness::provider());
         let fee = cfg.fee_amount(ESCROW);
         // payout + fee == escrow == ESCROW (nothing created or destroyed).
@@ -193,7 +194,7 @@ fun ask_job_fault_slashes_provider_via_provider_signed_path() {
     // bond_share = BOND * QTY / CAPACITY = 10_000_000 * 10 / 100 = 1_000_000.
     sc.next_tx(harness::consumer2());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_refunded(), 1);
         assert!(job::job_slashed(&job) == true, 2);
         assert!(job::job_escrow_value(&job) == 0, 3);
@@ -201,7 +202,7 @@ fun ask_job_fault_slashes_provider_via_provider_signed_path() {
     };
     sc.next_tx(harness::provider());
     {
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(staking::slashed_total(&stake) == 1_000_000, 4);
         assert!(staking::bond_value(&stake) == BOND - 1_000_000, 5);
         ts::return_to_address(harness::provider(), stake);

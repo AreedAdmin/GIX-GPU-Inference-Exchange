@@ -31,6 +31,7 @@ use gix::config::Config;
 use gix::harness;
 use gix::job::{Self, Job};
 use gix::markets::M_H100_LLAMA8B;
+use gix::mock_usdc::MOCK_USDC;
 use gix::settlement::{Self, Treasury};
 use gix::staking::{Self, ProviderStake};
 use sui::test_scenario::{Self as ts};
@@ -60,7 +61,7 @@ fun fill_job_settles_no_escrow_burns_credit() {
     // The fill-job: no escrow, is_fill flag set, input blob recorded, price = qty (value-at-risk).
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(object::id(&job) == job_id, 1);
         assert!(job::job_is_fill(&job), 2);
         assert!(job::job_escrow_value(&job) == 0, 3);
@@ -76,7 +77,7 @@ fun fill_job_settles_no_escrow_burns_credit() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_verified(), 8);
         ts::return_shared(job);
     };
@@ -87,9 +88,9 @@ fun fill_job_settles_no_escrow_burns_credit() {
     // Job Settled; minted SCU consumed; treasury untouched (no fee on a fill-job settle).
     sc.next_tx(harness::provider());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
-        let treasury = sc.take_shared<Treasury>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
+        let treasury = sc.take_shared<Treasury<MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_settled(), 9);
         assert!(staking::minted_scu(&stake) == 0, 10); // QTY minted, consumed at settle_fill
         assert!(staking::reserved_scu(&stake) == 0, 11);
@@ -120,7 +121,7 @@ fun fill_job_fault_refunds_consumer_from_slash() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_attested(), 1);
         assert!(job::job_escrow_value(&job) == 0, 2); // never had escrow
         ts::return_shared(job);
@@ -131,7 +132,7 @@ fun fill_job_fault_refunds_consumer_from_slash() {
 
     sc.next_tx(harness::consumer());
     {
-        let job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+        let job = sc.take_shared<Job<M_H100_LLAMA8B, MOCK_USDC>>();
         assert!(job::job_state(&job) == job::s_refunded(), 3);
         assert!(job::job_slashed(&job), 4);
         ts::return_shared(job);
@@ -142,7 +143,7 @@ fun fill_job_fault_refunds_consumer_from_slash() {
     // from the slash and the remainder (499_990) lands in the treasury.
     sc.next_tx(harness::provider());
     {
-        let stake = ts::take_from_address<ProviderStake>(&sc, harness::provider());
+        let stake = ts::take_from_address<ProviderStake<MOCK_USDC>>(&sc, harness::provider());
         assert!(staking::slashed_total(&stake) == 500_000, 5);
         ts::return_to_address(harness::provider(), stake);
     };
@@ -158,7 +159,7 @@ fun fill_job_fault_refunds_consumer_from_slash() {
     // Treasury holds the slash remainder; no protocol fee on a faulted job.
     sc.next_tx(harness::consumer());
     {
-        let treasury = sc.take_shared<Treasury>();
+        let treasury = sc.take_shared<Treasury<MOCK_USDC>>();
         assert!(settlement::treasury_slash_collected(&treasury) == 500_000 - QTY, 7);
         assert!(settlement::treasury_fees_collected(&treasury) == 0, 8);
         ts::return_shared(treasury);

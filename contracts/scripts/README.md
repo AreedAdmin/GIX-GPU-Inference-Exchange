@@ -106,3 +106,42 @@ After this, `submit_mock_attestation` and adding any `MOCK`-prefixed measurement
 | `GIX_SCU_TOKENS` | `1000` | SCU tokens per credit for the M1 market. |
 | `GIX_SLA_P99_MS` | `5000` | Market p99 SLA. |
 | `GIX_GAS_BUDGET` | `200000000` | Gas budget per tx. |
+
+## The quote dollar is a generic phantom `Q` (no hardcoded coin)
+
+As of the DBUSDC work, the quote/bond/settlement coin is **not hardcoded**. It is a generic
+phantom type `Q` on the money-bearing structs (`Treasury<Q>`, `ProviderStake<Q>`, `Job<M, Q>`,
+`Escrow<Q>`) and the functions over them. The dollar is chosen **per network at
+instantiation**:
+
+| Network | `Q` | How it's selected |
+| --- | --- | --- |
+| **localnet** | `MOCK_USDC` (ours) | `init` auto-seeds a `Treasury<MOCK_USDC>`; `deploy.sh` unchanged |
+| **testnet** | `DBUSDC` (external) | `settlement::init_treasury<DBUSDC>` after publish; `Q` is a `--type-args` STRING only |
+| **mainnet** | real `USDC` (Circle) | `settlement::init_treasury<USDC>` |
+
+Because `Q` is generic, **the contract source never imports DBUSDC** — DBUSDC enters purely as
+the type-arg `0xf7152c05…::DBUSDC::DBUSDC` at call time (treasury, DeepBook pool, buy PTBs). So
+there is **no new `Move.toml` dependency**. `deploy.sh` and the localnet flow keep settling in
+`MOCK_USDC` exactly as before (the package `init` still seeds the `MOCK_USDC` treasury).
+
+## `stage-testnet-dbusdc.sh` — staged testnet bring-up (DEEP-gated, NOT executed)
+
+`stage-testnet-dbusdc.sh` stages the testnet (re)publish of the generic-`Q` package with the
+quote dollar pinned to **DBUSDC** plus the new **GB10 · Qwen3.6-35b** credit market. It is a
+**dry-run by default** — it prints the exact plan and touches nothing. It NEVER writes the live
+`deployment.testnet.json` and refuses to reuse the live package id `0x0ed255b1…`; under
+`--confirm` it writes a separate `deployment.testnet.staged.json`.
+
+```bash
+scripts/stage-testnet-dbusdc.sh            # DRY RUN — print the plan, touch nothing
+scripts/stage-testnet-dbusdc.sh --confirm  # EXECUTE — republish + setup, write staged manifest
+```
+
+Under `--confirm` it: (1) republishes the package (fresh id — parameterizing `Q` changed
+struct shapes, so this is a publish, not a compatible upgrade); (2) `init_treasury<DBUSDC>`;
+(3) `set_is_localnet false` (K4); (4) registers the Qwen `ModelRecord` (no MOCK measurement on
+testnet); (5) `create_market<M_GB10_QWEN35B>` (GB10, qwen3.6-35b, p99 30s); and (6) prints —
+but defers — `set_deepbook_pool_id` (it needs the `Credit<M_GB10_QWEN35B>/DBUSDC` DeepBook pool,
+the only DEEP-gated piece). Env overrides: `GIX_QWEN_MEASUREMENT`, `GIX_QWEN_WALRUS_BLOB_ID`,
+`GIX_QWEN_MODEL_HASH`, `GIX_SCU_TOKENS`, `GIX_SLA_P99_MS`, `GIX_GAS_BUDGET`, `GIX_OUT`.
