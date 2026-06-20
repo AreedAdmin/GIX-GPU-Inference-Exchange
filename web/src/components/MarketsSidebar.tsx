@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useGix } from "../store";
 import { fmtPct, fmtPrice } from "../lib/format";
+import { OnRampWidget } from "./OnRampWidget";
 
 export function MarketsSidebar() {
   const { markets, activeMarketId, setActiveMarket, tickersByMarket } = useGix();
@@ -69,6 +70,13 @@ export function MarketsSidebar() {
             </button>
           );
         })}
+      </div>
+
+      {/* SUI → USDC on-ramp — a small funding utility beside the markets. It is
+          self-contained (own glass surface) and degrades gracefully when the
+          wallet is disconnected or off testnet, so it never disturbs the list. */}
+      <div className="shrink-0 border-t border-border-glass p-2">
+        <OnRampWidget />
       </div>
     </div>
   );
