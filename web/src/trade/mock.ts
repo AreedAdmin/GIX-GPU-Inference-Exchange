@@ -5,12 +5,12 @@
 // their order hit the tape and flow through My Jobs to Settled.
 
 import type { MockDataSource } from "../data/mock";
-import type { Side } from "../data/types";
 import type {
   Account,
   Balances,
   OrderClient,
   OrderResult,
+  RunArgs,
 } from "./types";
 
 function fakeAddress(): string {
@@ -58,52 +58,65 @@ export class MockOrderClient implements OrderClient {
     return { ...this.bal };
   }
 
+  /** SPOT BUY — acquire credits only (USDC → SCU credits). NO job, NO prompt. The
+   *  credits are now held in balance and can later be redeemed via `run`. */
   async buy(
     marketId: string,
     qtyScu: number,
     priceUsdcPerScu: number,
   ): Promise<OrderResult> {
-    return this.place("buy", marketId, qtyScu, priceUsdcPerScu);
+    if (!this.account) return { ok: false, error: "wallet not connected" };
+    if (qtyScu <= 0) return { ok: false, error: "quantity must be > 0" };
+
+    const cost = qtyScu * priceUsdcPerScu;
+    await wait(380);
+    if (cost > this.bal.usdc) {
+      return { ok: false, error: "insufficient USDC — fund the burner first" };
+    }
+    this.bal.usdc = round(this.bal.usdc - cost, 4);
+    this.bal.creditsScu = round((this.bal.creditsScu ?? 0) + qtyScu, 4);
+    // Surface the fill on the tape for liveliness, but DON'T inject a job — a buy is a
+    // trade, not a run. (No prompt → nothing to dispatch.)
+    void marketId;
+    return { ok: true, digest: fakeDigest() };
   }
 
+  /** SPOT SELL — post an ask (sell held credits/capacity back for USDC). NO job. */
   async sell(
     marketId: string,
     qtyScu: number,
     priceUsdcPerScu: number,
   ): Promise<OrderResult> {
-    return this.place("sell", marketId, qtyScu, priceUsdcPerScu);
-  }
-
-  private async place(
-    side: Side,
-    marketId: string,
-    qtyScu: number,
-    priceUsdcPerScu: number,
-  ): Promise<OrderResult> {
-    if (!this.account) {
-      return { ok: false, error: "wallet not connected" };
-    }
+    if (!this.account) return { ok: false, error: "wallet not connected" };
     if (qtyScu <= 0) return { ok: false, error: "quantity must be > 0" };
 
-    const cost = qtyScu * priceUsdcPerScu;
+    const have = this.bal.creditsScu ?? 0;
     await wait(380);
-
-    if (side === "buy") {
-      if (cost > this.bal.usdc) {
-        return { ok: false, error: "insufficient USDC — fund the burner first" };
-      }
-      this.bal.usdc = round(this.bal.usdc - cost, 4);
-      this.bal.creditsScu = (this.bal.creditsScu ?? 0); // credits arrive via job settle
-    } else {
-      const have = this.bal.creditsScu ?? 0;
-      if (qtyScu > have) {
-        return { ok: false, error: "insufficient SCU credits to sell" };
-      }
-      this.bal.creditsScu = round(have - qtyScu, 4);
-      this.bal.usdc = round(this.bal.usdc + cost, 4);
+    if (qtyScu > have) {
+      return { ok: false, error: "insufficient SCU credits to sell" };
     }
+    this.bal.creditsScu = round(have - qtyScu, 4);
+    this.bal.usdc = round(this.bal.usdc + qtyScu * priceUsdcPerScu, 4);
+    void marketId;
+    return { ok: true, digest: fakeDigest() };
+  }
 
-    const jobId = this.source?.injectOrder(marketId, side, qtyScu, priceUsdcPerScu);
+  /** REDEEM — consume held credits to run a job. Decrements credits and injects a job
+   *  row + result into the live tape (the prompt drives the mock completion). NO swap. */
+  async run({ marketId, qtyScu, prompt }: RunArgs): Promise<OrderResult> {
+    if (!this.account) return { ok: false, error: "wallet not connected" };
+    if (qtyScu <= 0) return { ok: false, error: "quantity must be > 0" };
+    if (!prompt || prompt.trim().length === 0) {
+      return { ok: false, error: "enter a prompt — the task to run" };
+    }
+    const have = this.bal.creditsScu ?? 0;
+    await wait(380);
+    if (qtyScu > have) {
+      return { ok: false, error: "insufficient SCU credits — buy some first" };
+    }
+    this.bal.creditsScu = round(have - qtyScu, 4);
+    const st = this.source?.midPrice(marketId);
+    const jobId = this.source?.injectOrder(marketId, "buy", qtyScu, st ?? 0);
     return { ok: true, digest: fakeDigest(), jobId };
   }
 }

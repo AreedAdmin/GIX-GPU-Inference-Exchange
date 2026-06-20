@@ -3,6 +3,10 @@ import { useActiveMarket, useGix } from "../store";
 import { fmtScu, fmtUsdc, fmtPrice } from "../lib/format";
 import { shortId } from "../lib/config";
 
+// Top-level: TRADE (spot — buy/sell credits, no prompt) vs RUN (redeem held credits → job).
+// Buying compute ≠ running a job: a credit is a holdable Coin<Credit<M>>, so the two flows
+// are decoupled. The prompt lives ONLY in Run mode and the Buy & run toggle.
+type Mode = "trade" | "run";
 type Side = "buy" | "sell";
 type OrderType = "limit" | "market";
 
@@ -18,15 +22,16 @@ export function OrderTicket() {
     connectWallet,
     fundWallet,
     submitOrder,
-    isLiveChain,
   } = useGix();
   const market = useActiveMarket();
 
+  const [mode, setMode] = useState<Mode>("trade");
   const [side, setSide] = useState<Side>("buy");
   const [type, setType] = useState<OrderType>("limit");
   const [price, setPrice] = useState<string>("");
   const [amount, setAmount] = useState<string>("");
   const [prompt, setPrompt] = useState<string>("");
+  const [buyAndRun, setBuyAndRun] = useState(false);
   const [pctSel, setPctSel] = useState<number>(0);
   const [flash, setFlash] = useState<{ kind: "ok" | "err"; msg: string } | null>(
     null,
@@ -41,11 +46,12 @@ export function OrderTicket() {
     if (!priceTouched && mid) setPrice(fmtPrice(mid));
   }, [mid, priceTouched]);
 
-  // book-row click prefills price
+  // book-row click prefills price (and switches to Trade — price is a trade concept)
   useEffect(() => {
     if (prefillPrice != null) {
       setPrice(fmtPrice(prefillPrice));
       setPriceTouched(true);
+      setMode("trade");
       setPrefillPrice(null);
     }
   }, [prefillPrice, setPrefillPrice]);
@@ -57,11 +63,28 @@ export function OrderTicket() {
   const usdc = balances?.usdc ?? 0;
   const credits = balances?.creditsScu ?? 0;
 
-  // available depends on side
+  // Run-tab empty state: the user holds 0 compute credits, so there's nothing to redeem.
+  // Show a friendly nudge to buy credits on the Trade tab instead of a dead submit.
+  const runEmpty = mode === "run" && credits <= 0;
+  function goBuyCredits() {
+    setMode("trade");
+    setSide("buy");
+    setBuyAndRun(false);
+  }
+
+  // The prompt is required on Run, and on a Trade-Buy with the "Buy & run now" toggle on.
+  const isRun = mode === "run";
+  const promptShown = isRun || (mode === "trade" && side === "buy" && buyAndRun);
+  const promptRequired = promptShown;
+  // Run consumes credits; Buy spends USDC; Sell sells held credits.
+  const spendsCredits = isRun;
+
+  // available depends on mode/side
   const maxAffordableScu = useMemo(() => {
+    if (isRun) return credits; // redeem held credits
     if (side === "buy") return priceNum > 0 ? usdc / priceNum : 0;
-    return credits;
-  }, [side, priceNum, usdc, credits]);
+    return credits; // sell held credits
+  }, [isRun, side, priceNum, usdc, credits]);
 
   function applyPct(p: number) {
     setPctSel(p);
@@ -77,6 +100,12 @@ export function OrderTicket() {
     }
   }, [amountNum, maxAffordableScu]);
 
+  // reset amount/slider when switching mode/side so % presets re-base on the new max
+  useEffect(() => {
+    setAmount("");
+    setPctSel(0);
+  }, [mode, side]);
+
   async function onSubmit() {
     setFlash(null);
     if (!account) {
@@ -87,23 +116,42 @@ export function OrderTicket() {
       setFlash({ kind: "err", msg: "enter an amount" });
       return;
     }
-    if (side === "buy" && isLiveChain && prompt.trim().length === 0) {
+    if (promptRequired && prompt.trim().length === 0) {
       setFlash({ kind: "err", msg: "enter a prompt — the task to run" });
       return;
     }
+
+    // resolve the action mode for the store
+    const submitMode: "buy" | "sell" | "run" | "buyAndRun" = isRun
+      ? "run"
+      : side === "sell"
+        ? "sell"
+        : buyAndRun
+          ? "buyAndRun"
+          : "buy";
+
     setSubmitting(true);
     const res = await submitOrder({
-      side,
+      mode: submitMode,
+      side: isRun ? "buy" : side,
       type,
       price: priceNum,
       sizeScu: amountNum,
-      prompt: side === "buy" ? prompt : undefined,
+      prompt: promptShown ? prompt : undefined,
     });
     setSubmitting(false);
     if (res.ok) {
+      const verb =
+        submitMode === "run"
+          ? "job dispatched"
+          : submitMode === "buyAndRun"
+            ? "bought & running"
+            : submitMode === "sell"
+              ? "ask posted"
+              : "credits bought";
       setFlash({
         kind: "ok",
-        msg: `order sent · ${res.jobId ? shortId(res.jobId) : res.digest ? shortId(res.digest) : "ok"}`,
+        msg: `${verb} · ${res.jobId ? shortId(res.jobId) : res.digest ? shortId(res.digest) : "ok"}`,
       });
       setAmount("");
       setPctSel(0);
@@ -114,96 +162,200 @@ export function OrderTicket() {
     setTimeout(() => setFlash(null), 4000);
   }
 
-  const accent = side === "buy" ? "var(--buy)" : "var(--sell)";
+  // accent: Run = accent amber; Trade-Buy = green, Trade-Sell = red
+  const accent = isRun ? "var(--accent)" : side === "buy" ? "var(--buy)" : "var(--sell)";
   const submitLabel = !account
     ? "Connect Burner"
-    : side === "buy"
-      ? "BUY COMPUTE"
-      : "SELL CAPACITY";
+    : isRun
+      ? "RUN JOB"
+      : side === "buy"
+        ? buyAndRun
+          ? "BUY & RUN"
+          : "BUY CREDITS"
+        : "SELL CAPACITY";
 
   return (
     <div className="glass-2 flex h-full min-h-0 flex-col rounded-glass">
-      {/* Buy / Sell tabs */}
+      {/* Trade / Run top-level tabs — buying compute is decoupled from running a job */}
       <div className="grid grid-cols-2 gap-0 p-2 pb-0">
         <TabBtn
-          active={side === "buy"}
-          color="var(--buy)"
-          onClick={() => setSide("buy")}
+          active={mode === "trade"}
+          color="var(--accent)"
+          onClick={() => setMode("trade")}
         >
-          Buy · Bid
+          Trade
         </TabBtn>
         <TabBtn
-          active={side === "sell"}
-          color="var(--sell)"
-          onClick={() => setSide("sell")}
+          active={mode === "run"}
+          color="var(--accent)"
+          onClick={() => setMode("run")}
         >
-          Sell · Ask
+          Run
         </TabBtn>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-        {/* Limit / Market */}
-        <div className="flex items-center gap-3 border-b border-border-glass pb-2">
-          {(["limit", "market"] as OrderType[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setType(t)}
-              className={`text-[12px] capitalize transition ${
-                type === t
-                  ? "font-medium text-primary"
-                  : "text-muted hover:text-secondary"
-              }`}
+        {/* Trade: Buy / Sell sub-tabs */}
+        {mode === "trade" && (
+          <div className="grid grid-cols-2 gap-0 border-b border-border-glass pb-0">
+            <TabBtn
+              active={side === "buy"}
+              color="var(--buy)"
+              onClick={() => setSide("buy")}
             >
-              {t}
-              {type === t && (
-                <span
-                  className="mt-0.5 block h-[2px] w-full rounded"
-                  style={{ background: "var(--accent)" }}
-                />
-              )}
+              Buy · Bid
+            </TabBtn>
+            <TabBtn
+              active={side === "sell"}
+              color="var(--sell)"
+              onClick={() => setSide("sell")}
+            >
+              Sell · Ask
+            </TabBtn>
+          </div>
+        )}
+
+        {mode === "run" && !runEmpty && (
+          <p className="rounded-md border border-border-glass bg-elev/40 px-3 py-2 text-[11px] leading-relaxed text-muted">
+            Redeem your held SCU credits to run an inference job. Buying credits
+            (Trade) and running a job are separate — no swap happens here.
+          </p>
+        )}
+
+        {/* Run-tab empty state — 0 credits held: nudge to buy on Trade instead of a dead submit. */}
+        {runEmpty && (
+          <div className="flex flex-col items-center gap-3 rounded-glass border border-border-glass bg-elev/40 px-5 py-8 text-center">
+            <div
+              className="flex h-11 w-11 items-center justify-center rounded-full text-[20px]"
+              style={{ background: "var(--accent-dim)", color: "var(--accent)" }}
+            >
+              ⚡
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[13px] font-medium text-primary">
+                You hold no compute credits
+              </p>
+              <p className="text-[11.5px] leading-relaxed text-muted">
+                Running a job redeems held SCU credits. Buy some on the{" "}
+                <span className="font-medium text-accent">Trade</span> tab first, then come
+                back here to run your prompt.
+              </p>
+            </div>
+            <button
+              onClick={goBuyCredits}
+              className="focus-amber mt-1 flex h-9 items-center justify-center rounded-md px-5 text-[12.5px] font-semibold tracking-wide transition hover:brightness-[1.06] active:translate-y-px"
+              style={{
+                background: "var(--accent)",
+                color: "var(--bg-0)",
+                boxShadow: "0 6px 20px var(--accent-dim)",
+              }}
+            >
+              Buy credits on Trade →
             </button>
-          ))}
-        </div>
+          </div>
+        )}
+
+        {/* Limit / Market — trade-only (Run redeems at no price) */}
+        {!runEmpty && mode === "trade" && (
+          <div className="flex items-center gap-3 border-b border-border-glass pb-2">
+            {(["limit", "market"] as OrderType[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setType(t)}
+                className={`text-[12px] capitalize transition ${
+                  type === t
+                    ? "font-medium text-primary"
+                    : "text-muted hover:text-secondary"
+                }`}
+              >
+                {t}
+                {type === t && (
+                  <span
+                    className="mt-0.5 block h-[2px] w-full rounded"
+                    style={{ background: "var(--accent)" }}
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* available balance line */}
-        <div className="flex items-center justify-between">
-          <span className="label-micro">Available</span>
-          <span className="num text-[11.5px] text-secondary tabnum">
-            {side === "buy"
-              ? `${fmtUsdc(usdc, 2)} USDC`
-              : `${fmtScu(credits)} SCU`}
-          </span>
-        </div>
+        {!runEmpty && (
+          <div className="flex items-center justify-between">
+            <span className="label-micro">Available</span>
+            <span className="num text-[11.5px] text-secondary tabnum">
+              {isRun
+                ? `${fmtScu(credits)} SCU credits`
+                : side === "buy"
+                  ? `${fmtUsdc(usdc, 2)} USDC`
+                  : `${fmtScu(credits)} SCU`}
+            </span>
+          </div>
+        )}
 
-        {/* price */}
-        <Field
-          label="Price"
-          unit="USDC"
-          disabled={type === "market"}
-          value={type === "market" ? "Market" : price}
-          onChange={(v) => {
-            setPrice(v);
-            setPriceTouched(true);
-          }}
-          mono
-        />
+        {/* price — trade-only */}
+        {!runEmpty && mode === "trade" && (
+          <Field
+            label="Price"
+            unit="USDC"
+            disabled={type === "market"}
+            value={type === "market" ? "Market" : price}
+            onChange={(v) => {
+              setPrice(v);
+              setPriceTouched(true);
+            }}
+            mono
+          />
+        )}
 
         {/* amount */}
-        <Field
-          label="Amount"
-          unit="SCU"
-          value={amount}
-          onChange={setAmount}
-          placeholder="0"
-          mono
-        />
+        {!runEmpty && (
+          <Field
+            label="Amount"
+            unit="SCU"
+            value={amount}
+            onChange={setAmount}
+            placeholder="0"
+            mono
+          />
+        )}
 
-        {/* prompt — the real inference task to run (demo-contract runTask). Buy only. */}
-        {side === "buy" && (
+        {/* Buy & run now — the one-click consumer shortcut (combined buy + run). Only on
+            a Trade-Buy; toggling it on reveals the prompt below. */}
+        {!runEmpty && mode === "trade" && side === "buy" && (
+          <label className="flex cursor-pointer items-center justify-between rounded-md border border-border-glass bg-elev/40 px-3 py-2 transition hover:border-accent/40">
+            <span className="label-micro flex items-center gap-1.5">
+              <span className="text-accent">⚡</span>
+              <span>Buy &amp; run now</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={buyAndRun}
+              onClick={() => setBuyAndRun((v) => !v)}
+              className="focus-amber relative h-[18px] w-[32px] rounded-full transition"
+              style={{
+                background: buyAndRun ? "var(--accent)" : "var(--border-glass)",
+              }}
+            >
+              <span
+                className="absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all"
+                style={{
+                  left: buyAndRun ? "16px" : "2px",
+                  background: buyAndRun ? "var(--bg-0)" : "var(--text-dim)",
+                }}
+              />
+            </button>
+          </label>
+        )}
+
+        {/* prompt — ONLY in Run mode or under the Buy & run toggle. Never on plain Buy/Sell. */}
+        {!runEmpty && promptShown && (
           <label className="flex flex-col gap-1.5 rounded-md border border-border-glass bg-elev/40 px-3 py-2 transition focus-within:border-accent/60 focus-within:shadow-accent-glow">
             <span className="label-micro flex items-center justify-between">
               <span>Prompt · task to run</span>
-              {isLiveChain && <span className="text-accent">required</span>}
+              <span className="text-accent">required</span>
             </span>
             <textarea
               value={prompt}
@@ -216,6 +368,7 @@ export function OrderTicket() {
         )}
 
         {/* % slider */}
+        {!runEmpty && (
         <div className="pt-1">
           <input
             type="range"
@@ -247,17 +400,30 @@ export function OrderTicket() {
             ))}
           </div>
         </div>
+        )}
 
-        {/* total */}
-        <div className="flex items-center justify-between border-t border-border-glass pt-2.5">
-          <span className="label-micro">Total</span>
-          <span className="num text-[13px] font-medium text-primary tabnum">
-            {fmtUsdc(total, 4)}{" "}
-            <span className="text-[10px] text-muted">USDC</span>
-          </span>
-        </div>
+        {/* total — a cost in Trade, an SCU spend in Run */}
+        {!runEmpty && (
+          <div className="flex items-center justify-between border-t border-border-glass pt-2.5">
+            <span className="label-micro">{spendsCredits ? "Spends" : "Total"}</span>
+            <span className="num text-[13px] font-medium text-primary tabnum">
+              {spendsCredits ? (
+                <>
+                  {fmtScu(amountNum)}{" "}
+                  <span className="text-[10px] text-muted">SCU</span>
+                </>
+              ) : (
+                <>
+                  {fmtUsdc(total, 4)}{" "}
+                  <span className="text-[10px] text-muted">USDC</span>
+                </>
+              )}
+            </span>
+          </div>
+        )}
 
         {/* submit */}
+        {!runEmpty && (
         <button
           onClick={onSubmit}
           disabled={submitting || connecting}
@@ -265,11 +431,20 @@ export function OrderTicket() {
           style={{
             background: account ? accent : "var(--accent)",
             color: "var(--bg-0)",
-            boxShadow: `0 6px 20px ${account ? (side === "buy" ? "rgba(46,189,133,0.25)" : "rgba(246,70,93,0.25)") : "var(--accent-dim)"}`,
+            boxShadow: `0 6px 20px ${
+              account
+                ? isRun
+                  ? "var(--accent-dim)"
+                  : side === "buy"
+                    ? "rgba(46,189,133,0.25)"
+                    : "rgba(246,70,93,0.25)"
+                : "var(--accent-dim)"
+            }`,
           }}
         >
           {submitting ? "Submitting…" : connecting ? "Connecting…" : submitLabel}
         </button>
+        )}
 
         {flash && (
           <div

@@ -27,6 +27,10 @@ export interface ChainConfig {
   market: MarketChainConfig;
   /** Block-explorer base; an empty string disables explorer links (localnet). */
   explorerTxBase: string;
+  /** Object-explorer base (for Job ids), e.g. https://suiscan.xyz/testnet/object. Empty = off. */
+  explorerObjectBase: string;
+  /** Public Walrus aggregator base for blob retrieval in the in-browser auditor. */
+  walrusAggregator: string;
 }
 
 export interface MarketChainConfig {
@@ -81,6 +85,16 @@ export function loadChainConfig(): ChainConfig {
     env("VITE_EXPLORER_TX_BASE") ??
     (network === "localnet" ? "" : `https://suiscan.xyz/${network}/tx`);
 
+  const explorerObjectBase =
+    env("VITE_EXPLORER_OBJECT_BASE") ??
+    (network === "localnet" ? "" : `https://suiscan.xyz/${network}/object`);
+
+  // Public Walrus aggregator (testnet by default — read-only blob retrieval for the F7
+  // in-browser auditor). Mainnet/devnet swap via VITE_WALRUS_AGGREGATOR.
+  const walrusAggregator =
+    env("VITE_WALRUS_AGGREGATOR") ??
+    "https://aggregator.walrus-testnet.walrus.space";
+
   return {
     network,
     rpcUrl,
@@ -101,6 +115,8 @@ export function loadChainConfig(): ChainConfig {
       slaP99Ms: LOCALNET_MARKET.slaP99Ms,
     },
     explorerTxBase,
+    explorerObjectBase,
+    walrusAggregator,
   };
 }
 

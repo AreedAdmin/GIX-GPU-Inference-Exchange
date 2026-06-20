@@ -29,6 +29,7 @@ import { SuiOrderClient } from "./trade/sui";
 import { orderClientKind, loadChainConfig, explorerTxUrl } from "./trade/config";
 import type { JobResult } from "./trade/result";
 import { sha2_256Hex as sha2_256HexBrowser } from "./trade/result";
+import { runAudit, type AuditResult, type AuditTarget } from "./trade/audit";
 import type { Account, Balances, OrderClient } from "./trade/types";
 
 /** Build the injected OrderClient: real on-chain (VITE_ORDER_CLIENT=sui) or the mock. */
@@ -95,10 +96,15 @@ interface GixState {
   fundWallet: () => Promise<void>;
   refreshBalances: () => Promise<void>;
 
-  // order submission helper — wraps OrderClient.buy/sell + records an open order.
-  // `prompt` is the real inference task to run (demo-contract runTask); buys with a
-  // prompt route through SuiOrderClient.runTask when the real client is wired.
+  // order submission helper — wraps the OrderClient actions + records an open order.
+  // The spot model decouples buying compute from running a job:
+  //   • mode "buy"       → acquire credits (USDC → Credit), held in balance. NO job, NO prompt.
+  //   • mode "sell"      → post an ask (sell capacity). NO job, NO prompt.
+  //   • mode "run"       → redeem HELD credits → create_job + dispatch. prompt REQUIRED.
+  //   • mode "buyAndRun" → atomic buy + run (SuiOrderClient.runTask). prompt REQUIRED.
+  // Only the job-creating paths (run, buyAndRun) record jobMeta + a My-Jobs row.
   submitOrder: (args: {
+    mode: "buy" | "sell" | "run" | "buyAndRun";
     side: "buy" | "sell";
     type: "limit" | "market";
     price: number;
@@ -123,6 +129,19 @@ interface GixState {
   closeResult: () => void;
   /** Explorer URL for a tx digest (empty on localnet). */
   explorerUrl: (digest?: string) => string | undefined;
+
+  // ── F7 in-browser audit (pool-free-e2e §4) ─────────────────────────────────
+  /** Per-job F7 audit result (hash/sig/model checks), keyed by jobId. */
+  audits: Record<string, AuditResult>;
+  /** Per-job audit-run status for the drawer UI. */
+  auditStatus: Record<string, "idle" | "running" | "error">;
+  /** jobId currently shown in the AuditDrawer (null = closed). */
+  auditingJobId: string | null;
+  /** Open the AuditDrawer for a job and run the F7 audit if not already run. */
+  openAudit: (jobId: string) => void;
+  closeAudit: () => void;
+  /** (Re)run the F7 audit for a job. */
+  runJobAudit: (jobId: string) => Promise<void>;
 }
 
 /** Per-job metadata captured at buy time so the result viewer can show cost + digest. */
@@ -170,6 +189,10 @@ export function GixProvider({ children }: { children: ReactNode }) {
   const isLiveChain = orderClientKind() === "sui";
   const chainCfgRef = useRef(loadChainConfig());
   const [results, setResults] = useState<Record<string, JobResult>>({});
+  // mirror of `results` for callbacks that read it right after an async fetch (avoids
+  // stale-closure reads when the audit runs immediately after fetchResult resolves).
+  const resultsRef = useRef<Record<string, JobResult>>({});
+  resultsRef.current = results;
   const [resultStatus, setResultStatus] = useState<
     Record<string, "idle" | "loading" | "error">
   >({});
@@ -177,6 +200,13 @@ export function GixProvider({ children }: { children: ReactNode }) {
   const [viewingJobId, setViewingJobId] = useState<string | null>(null);
   // per-job buy-time metadata (prompt/cost/digest) for the viewer
   const jobMetaRef = useRef<Record<string, JobMeta>>({});
+
+  // F7 in-browser audit state
+  const [audits, setAudits] = useState<Record<string, AuditResult>>({});
+  const [auditStatus, setAuditStatus] = useState<
+    Record<string, "idle" | "running" | "error">
+  >({});
+  const [auditingJobId, setAuditingJobId] = useState<string | null>(null);
 
   // ── connect the data source once ──────────────────────────────────────────
   useEffect(() => {
@@ -326,24 +356,40 @@ export function GixProvider({ children }: { children: ReactNode }) {
   }, [refreshBalances]);
 
   const submitOrder = useCallback<GixState["submitOrder"]>(
-    async ({ side, type, price, sizeScu, prompt }) => {
+    async ({ mode, side, type, price, sizeScu, prompt }) => {
       const client = orderClientRef.current;
       const mkt = activeMarketId;
-      // A buy with the real client routes through runTask so the prompt (the actual
-      // inference task) is POSTed to the provider /inputs before create_job.
+      // A run/buyAndRun creates a job (and a result target); a plain buy/sell is just a
+      // trade — credits move, but nothing is dispatched.
+      const createsJob = mode === "run" || mode === "buyAndRun";
+
       let res;
-      if (side === "buy" && client instanceof SuiOrderClient) {
-        res = await client.runTask({
-          marketId: mkt,
-          qtyScu: sizeScu,
-          priceUsdcPerScu: price,
-          prompt: prompt ?? "",
-        });
-      } else if (side === "buy") {
+      if (mode === "buyAndRun") {
+        // The one-click consumer shortcut: atomic buy + run. The real client POSTs the
+        // prompt to /inputs then create_jobs inline (runTask); the mock buys then runs.
+        if (client instanceof SuiOrderClient) {
+          res = await client.runTask({
+            marketId: mkt,
+            qtyScu: sizeScu,
+            priceUsdcPerScu: price,
+            prompt: prompt ?? "",
+          });
+        } else {
+          const bought = await client.buy(mkt, sizeScu, price);
+          res = bought.ok
+            ? await client.run({ marketId: mkt, qtyScu: sizeScu, prompt: prompt ?? "" })
+            : bought;
+        }
+      } else if (mode === "run") {
+        // Redeem held credits → create_job + dispatch. No swap.
+        res = await client.run({ marketId: mkt, qtyScu: sizeScu, prompt: prompt ?? "" });
+      } else if (mode === "buy") {
+        // Acquire credits only — held in balance, no job, no prompt.
         res = await client.buy(mkt, sizeScu, price);
       } else {
         res = await client.sell(mkt, sizeScu, price);
       }
+
       if (res.ok) {
         const order: OpenOrder = {
           id: res.jobId ?? `ord-${Date.now().toString(36)}`,
@@ -358,10 +404,11 @@ export function GixProvider({ children }: { children: ReactNode }) {
         };
         setOpenOrders((prev) => [order, ...prev].slice(0, 40));
 
+        // Only job-creating paths (run, buyAndRun) record job metadata + a My Jobs row.
         // Record buy-time metadata + (for the real chain, where there's no WS feed
-        // injecting it) an optimistic My Jobs row so the bought job is trackable and
-        // the result viewer has a target. The mock source injects its own job.
-        if (res.jobId) {
+        // injecting it) an optimistic My Jobs row so the job is trackable and the result
+        // viewer has a target. The mock source injects its own job.
+        if (createsJob && res.jobId) {
           jobMetaRef.current[res.jobId] = {
             prompt,
             costUsdc: price * sizeScu,
@@ -413,23 +460,22 @@ export function GixProvider({ children }: { children: ReactNode }) {
             ? mockCompletion(meta.prompt)
             : "Mock completion — run with VITE_ORDER_CLIENT=sui + a live provider for the real model output.";
         const localHash = await sha2_256HexBrowser(output);
-        setResults((prev) => ({
-          ...prev,
-          [jobId]: {
-            jobId,
-            model: chainCfgRef.current.market.name,
-            output,
-            localOutputHash: localHash,
-            reportedOutputHash: localHash,
-            verified: true,
-            outputTokenCount: Math.ceil(output.length / 4),
-            tStart: job?.createdTs ?? Date.now() - 1500,
-            tEnd: job?.updatedTs ?? Date.now(),
-            providerPubkey: "mock-attestation-key",
-            costUsdc: meta?.costUsdc ?? (job ? job.price * job.sizeScu : undefined),
-            digest: meta?.digest,
-          },
-        }));
+        const mockResult: JobResult = {
+          jobId,
+          model: chainCfgRef.current.market.name,
+          output,
+          localOutputHash: localHash,
+          reportedOutputHash: localHash,
+          verified: true,
+          outputTokenCount: Math.ceil(output.length / 4),
+          tStart: job?.createdTs ?? Date.now() - 1500,
+          tEnd: job?.updatedTs ?? Date.now(),
+          providerPubkey: "mock-attestation-key",
+          costUsdc: meta?.costUsdc ?? (job ? job.price * job.sizeScu : undefined),
+          digest: meta?.digest,
+        };
+        resultsRef.current = { ...resultsRef.current, [jobId]: mockResult };
+        setResults((prev) => ({ ...prev, [jobId]: mockResult }));
         setResultStatus((prev) => ({ ...prev, [jobId]: "idle" }));
         return;
       }
@@ -446,6 +492,7 @@ export function GixProvider({ children }: { children: ReactNode }) {
           costUsdc: meta?.costUsdc,
           digest: meta?.digest,
         });
+        resultsRef.current = { ...resultsRef.current, [jobId]: r };
         setResults((prev) => ({ ...prev, [jobId]: r }));
         setResultStatus((prev) => ({ ...prev, [jobId]: "idle" }));
       } catch (e) {
@@ -468,6 +515,55 @@ export function GixProvider({ children }: { children: ReactNode }) {
     (digest?: string) => explorerTxUrl(chainCfgRef.current, digest),
     [],
   );
+
+  // ── F7 in-browser audit (pool-free-e2e §4) ──────────────────────────────────
+  // Assemble an AuditTarget from the verified result + per-job metadata + chain config,
+  // then run the F7 independent audit. Real on-chain values (blob ids, input/model hash,
+  // signature) aren't surfaced to the UI yet, so the auditor degrades to mock-synthesis
+  // for those (clearly labelled) while verifying whatever IS available live.
+  const runJobAudit = useCallback(
+    async (jobId: string) => {
+      setAuditStatus((prev) => ({ ...prev, [jobId]: "running" }));
+      try {
+        const cfg = chainCfgRef.current;
+        const r = resultsRef.current[jobId];
+        const meta = jobMetaRef.current[jobId];
+        const target: AuditTarget = {
+          jobId,
+          live: isLiveChain,
+          model: r?.model ?? cfg.market.name,
+          inputText: meta?.prompt,
+          outputText: r?.output,
+          // on-chain output_hash is recorded in the JobResult; input/model hash + blob
+          // ids + raw signature aren't surfaced to the browser yet → undefined ⇒ mock.
+          outputHash: r?.reportedOutputHash,
+          attestPubkey: r?.providerPubkey,
+          explorerObjectBase: cfg.explorerObjectBase,
+          walrusAggregator: cfg.walrusAggregator,
+        };
+        const audit = await runAudit(target);
+        setAudits((prev) => ({ ...prev, [jobId]: audit }));
+        setAuditStatus((prev) => ({ ...prev, [jobId]: "idle" }));
+      } catch {
+        setAuditStatus((prev) => ({ ...prev, [jobId]: "error" }));
+      }
+    },
+    [results, isLiveChain],
+  );
+
+  const openAudit = useCallback(
+    (jobId: string) => {
+      setAuditingJobId(jobId);
+      // ensure we have the result first (it carries the output + on-chain output_hash the
+      // audit re-hashes), THEN run the F7 audit so it audits the real bytes, not a stub.
+      void (async () => {
+        if (!results[jobId]) await fetchResult(jobId);
+        if (!audits[jobId]) await runJobAudit(jobId);
+      })();
+    },
+    [results, audits, fetchResult, runJobAudit],
+  );
+  const closeAudit = useCallback(() => setAuditingJobId(null), []);
 
   const value = useMemo<GixState>(
     () => ({
@@ -503,6 +599,12 @@ export function GixProvider({ children }: { children: ReactNode }) {
       openResult,
       closeResult,
       explorerUrl,
+      audits,
+      auditStatus,
+      auditingJobId,
+      openAudit,
+      closeAudit,
+      runJobAudit,
     }),
     [
       source,
@@ -535,6 +637,12 @@ export function GixProvider({ children }: { children: ReactNode }) {
       openResult,
       closeResult,
       explorerUrl,
+      audits,
+      auditStatus,
+      auditingJobId,
+      openAudit,
+      closeAudit,
+      runJobAudit,
     ],
   );
 

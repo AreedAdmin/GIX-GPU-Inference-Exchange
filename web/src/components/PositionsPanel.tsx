@@ -123,13 +123,14 @@ function MyJobsTab() {
 const RESULT_READY: JobState[] = ["Attested", "Verified", "Settled"];
 
 function JobRowView({ job, market }: { job: JobRow; market: string }) {
-  const { openResult, results } = useGix();
+  const { openResult, results, openAudit, audits } = useGix();
   const settled = job.state === "Settled";
   const slashed = job.state === "Slashed";
   const refunded = job.state === "Refunded" || job.state === "Expired";
   const terminal = TERMINAL.includes(job.state);
   const resultReady = RESULT_READY.includes(job.state);
   const fetched = results[job.jobId];
+  const audited = audits[job.jobId];
 
   const amountCell = slashed
     ? { v: `-${fmtUsdc(job.slashUsdc ?? 0, 2)}`, c: "var(--sell)" }
@@ -163,19 +164,45 @@ function JobRowView({ job, market }: { job: JobRow; market: string }) {
       </Td>
       <Td>
         {resultReady ? (
-          <button
-            onClick={() => openResult(job.jobId)}
-            className="num rounded border px-2 py-0.5 text-[10px] transition"
-            style={{
-              borderColor: fetched
-                ? "rgba(14,203,129,0.4)"
-                : "var(--border-glass)",
-              color: fetched ? "var(--buy)" : "var(--accent)",
-              background: fetched ? "var(--buy-bg)" : "transparent",
-            }}
-          >
-            {fetched ? `${fetched.verified ? "✓" : "✗"} view` : "view"}
-          </button>
+          <div className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => openResult(job.jobId)}
+              className="num rounded border px-2 py-0.5 text-[10px] transition"
+              style={{
+                borderColor: fetched
+                  ? "rgba(14,203,129,0.4)"
+                  : "var(--border-glass)",
+                color: fetched ? "var(--buy)" : "var(--accent)",
+                background: fetched ? "var(--buy-bg)" : "transparent",
+              }}
+            >
+              {fetched ? `${fetched.verified ? "✓" : "✗"} view` : "view"}
+            </button>
+            <button
+              onClick={() => openAudit(job.jobId)}
+              title="Run the F7 independent audit"
+              className="num rounded border px-2 py-0.5 text-[10px] transition"
+              style={{
+                borderColor: audited
+                  ? audited.ok
+                    ? "rgba(46,189,133,0.4)"
+                    : "rgba(246,70,93,0.4)"
+                  : "var(--border-glass)",
+                color: audited
+                  ? audited.ok
+                    ? "var(--buy)"
+                    : "var(--sell)"
+                  : "var(--accent)",
+                background: audited
+                  ? audited.ok
+                    ? "var(--buy-bg)"
+                    : "var(--sell-bg)"
+                  : "transparent",
+              }}
+            >
+              {audited ? `${audited.ok ? "✅" : "❌"} audit` : "audit"}
+            </button>
+          </div>
         ) : (
           <span className="text-muted">—</span>
         )}

@@ -48,6 +48,10 @@ interface ImportMetaEnv {
   readonly VITE_MARKET_MODEL_ID?: string;
   /** Explorer tx base, e.g. https://suiscan.xyz/testnet/tx (empty disables links). */
   readonly VITE_EXPLORER_TX_BASE?: string;
+  /** Explorer object base for Job ids, e.g. https://suiscan.xyz/testnet/object (empty disables). */
+  readonly VITE_EXPLORER_OBJECT_BASE?: string;
+  /** Public Walrus aggregator base for the in-browser F7 auditor (blob retrieval). */
+  readonly VITE_WALRUS_AGGREGATOR?: string;
 }
 interface ImportMeta {
   readonly env: ImportMetaEnv;

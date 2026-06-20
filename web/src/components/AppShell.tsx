@@ -9,6 +9,7 @@ import { OrderTicket } from "./OrderTicket";
 import { PositionsPanel } from "./PositionsPanel";
 import { StatusBar } from "./StatusBar";
 import { ResultViewer } from "./ResultViewer";
+import { AuditDrawer } from "./AuditDrawer";
 
 // Binance-style spot layout (contract §2):
 //   cols  [ markets 220px | center 1fr | ticket 320px ]
@@ -128,6 +129,9 @@ export function AppShell() {
 
       {/* verifiable-result viewer (opens over everything when a job is selected) */}
       <ResultViewer />
+
+      {/* F7 in-browser audit-trail viewer (opens over everything when auditing a job) */}
+      <AuditDrawer />
     </div>
   );
 }

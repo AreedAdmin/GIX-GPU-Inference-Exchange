@@ -17,6 +17,7 @@ export function ResultViewer() {
     resultErrors,
     fetchResult,
     explorerUrl,
+    openAudit,
   } = useGix();
 
   if (!viewingJobId) return null;
@@ -52,6 +53,13 @@ export function ResultViewer() {
           </div>
           <div className="flex items-center gap-3">
             {r && <VerifiedBadge ok={r.verified} />}
+            <button
+              onClick={() => openAudit(jobId)}
+              className="focus-amber rounded border border-border-glass px-2.5 py-1 text-[10.5px] text-accent transition hover:border-accent/50 hover:bg-accent/5"
+              title="Run the F7 independent audit (re-hash Walrus blobs vs the on-chain hashes)"
+            >
+              Audit
+            </button>
             <button
               onClick={closeResult}
               className="focus-amber rounded p-1 text-muted transition hover:text-primary"

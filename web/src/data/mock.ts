@@ -270,6 +270,12 @@ export class MockDataSource implements MarketDataSource {
     return () => this.jobSubs.delete(cb);
   }
 
+  /** Current live mid for a market (used when redeeming credits → a run job needs a
+   *  display price even though the redemption itself doesn't re-swap). */
+  midPrice(marketId: string): number {
+    return this.state.get(marketId)?.mid ?? 0;
+  }
+
   // Allow the OrderTicket's MockOrderClient to inject an optimistic trade + job so
   // a user-placed order shows up in the stream + My Jobs immediately.
   injectOrder(marketId: string, side: Side, sizeScu: number, price: number): string {

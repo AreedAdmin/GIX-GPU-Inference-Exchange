@@ -20,11 +20,20 @@ export interface OrderResult {
   error?: string;
 }
 
+/** Redeem held credits → run a job. The prompt (the real inference task) lives HERE,
+ *  not on a plain buy — buying credits is a trade, running a job consumes them. */
+export interface RunArgs {
+  marketId: string;
+  qtyScu: number;
+  prompt: string;
+}
+
 export interface OrderClient {
   connect(): Promise<Account>; // burner key
   fund(): Promise<void>; // localnet SUI + MOCK_USDC faucet
   balances(): Promise<Balances>;
-  // consumer buys compute → in M1 this drives the stubbed match → create_job lifecycle
+  // SPOT TRADE — acquire credits only (USDC → Credit<M>). Holds the coin in balance;
+  // NO create_job, NO prompt. Buying compute ≠ running a job.
   buy(
     marketId: string,
     qtyScu: number,
@@ -36,4 +45,7 @@ export interface OrderClient {
     qtyScu: number,
     priceUsdcPerScu: number,
   ): Promise<OrderResult>;
+  // REDEEM — consume held credits to run a job (create_job from a held Credit<M>; NO swap).
+  // The prompt is required here — this is where a credit turns into an inference job.
+  run(args: RunArgs): Promise<OrderResult>;
 }

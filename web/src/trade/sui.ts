@@ -33,7 +33,13 @@ import {
   sha2_256Bytes,
   type JobResult,
 } from "./result";
-import type { Account, Balances, OrderClient, OrderResult } from "./types";
+import type {
+  Account,
+  Balances,
+  OrderClient,
+  OrderResult,
+  RunArgs,
+} from "./types";
 
 type SuiClientT = import("@mysten/sui/jsonRpc").SuiJsonRpcClient;
 type TransactionT = import("@mysten/sui/transactions").Transaction;
@@ -159,11 +165,31 @@ export class SuiOrderClient implements OrderClient {
   }
 
   // ── §5 OrderClient surface ──────────────────────────────────────────────────
-  // A buy WITHOUT a prompt still works (empty prompt → input_hash of ""), but the demo
-  // path is runTask(prompt). The store calls runTask for buys so the prompt flows.
+  // SPOT BUY — acquire credits ONLY (USDC → Credit<M> via the market's DeepBook pool).
+  // No create_job, no prompt: buying compute is a trade, the held Credit<M> coin is
+  // redeemed later via `run`. The pool only exists once test DEEP is provisioned (M2);
+  // until then this degrades gracefully with a clear message rather than silently
+  // routing through create_job (which would fuse buy+run again).
   async buy(marketId: string, qtyScu: number, priceUsdcPerScu: number): Promise<OrderResult> {
-    const r = await this.runTask({ marketId, qtyScu, priceUsdcPerScu, prompt: "" });
-    return r;
+    await this.ensureClient();
+    if (!this.signer) return { ok: false, error: "wallet not connected" };
+    if (qtyScu <= 0) return { ok: false, error: "quantity must be > 0" };
+
+    const market = this.cfg.market;
+    if (marketId && marketId !== market.id) {
+      return {
+        ok: false,
+        error: "only the live deployment market is buyable on chain (others are simulated)",
+      };
+    }
+    void priceUsdcPerScu;
+    // The USDC→Credit swap leg lands with the Credit/USDC DeepBook pool (M2). Buying must
+    // NOT create a job — hold the Credit<M> coin, redeem it later via `run`.
+    return {
+      ok: false,
+      error:
+        "Spot buy (USDC → Credit) needs the Credit/USDC DeepBook pool — pending test DEEP (M2). Use Buy & run now for the atomic create_job path until the pool is live.",
+    };
   }
 
   /** Provider-side sell (stake + mint_credits + post ask) is the node/provider flow, not
@@ -174,6 +200,34 @@ export class SuiOrderClient implements OrderClient {
       ok: false,
       error:
         "Selling capacity is the provider node's flow (stake + mint_credits). This terminal is consumer-buy-only.",
+    };
+  }
+
+  /** REDEEM — run a job from a HELD Credit<M> coin (create_job, NO swap). The prompt is
+   *  POSTed to the provider, then create_job binds input_hash + consumes the buyer's own
+   *  credit coin (vs `runTask`, which buys the credit inline). Requires the consumer to
+   *  already hold a Credit<M> coin — i.e. a prior `buy`. */
+  async run({ marketId, qtyScu, prompt }: RunArgs): Promise<OrderResult> {
+    await this.ensureClient();
+    if (!this.signer) return { ok: false, error: "wallet not connected" };
+    if (qtyScu <= 0) return { ok: false, error: "quantity must be > 0" };
+    if (!prompt || prompt.trim().length === 0) {
+      return { ok: false, error: "enter a prompt — the task to run" };
+    }
+    const market = this.cfg.market;
+    if (marketId && marketId !== market.id) {
+      return {
+        ok: false,
+        error: "only the live deployment market can be run on chain (others are simulated)",
+      };
+    }
+    // The held-credit create_job path lands with the spot pool (so the consumer actually
+    // holds Credit<M> to redeem). Until then a plain Run can't redeem a real held coin —
+    // route the demo through Buy & run now (runTask), which buys the credit inline.
+    return {
+      ok: false,
+      error:
+        "Run-from-held-credit needs the spot Credit/USDC pool to first acquire credits (M2). Use Buy & run now for the atomic path until the pool is live.",
     };
   }
 
