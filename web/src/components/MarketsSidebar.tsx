@@ -27,14 +27,17 @@ export function MarketsSidebar() {
             <button
               key={m.id}
               onClick={() => setActiveMarket(m.id)}
-              className={`group relative grid w-full grid-cols-[1fr_auto] items-center gap-x-2 px-3 py-2 text-left transition ${
-                active ? "bg-accent/[0.08]" : "hover:bg-white/[0.035]"
+              className={`group focus-amber relative grid w-full grid-cols-[1fr_auto] items-center gap-x-2 px-3 py-2 text-left transition ${
+                active ? "bg-accent/[0.08]" : "hover:bg-accent/[0.035]"
               }`}
             >
               {active && (
                 <span
                   className="absolute left-0 top-0 h-full w-[2px]"
-                  style={{ background: "var(--accent)" }}
+                  style={{
+                    background: "var(--accent)",
+                    boxShadow: "0 0 8px var(--accent-glow)",
+                  }}
                 />
               )}
               <div className="flex min-w-0 flex-col">

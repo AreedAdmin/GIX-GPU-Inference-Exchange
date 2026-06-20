@@ -236,10 +236,10 @@ export function OrderTicket() {
               <button
                 key={p}
                 onClick={() => applyPct(p)}
-                className={`rounded border py-1 text-[10.5px] transition ${
+                className={`focus-amber rounded border py-1 text-[10.5px] transition ${
                   pctSel === p
-                    ? "border-border-glass-2 text-primary"
-                    : "border-border-glass text-muted hover:text-secondary"
+                    ? "border-accent/45 bg-accent/[0.08] text-primary"
+                    : "border-border-glass text-muted hover:border-accent/30 hover:text-secondary"
                 }`}
               >
                 {p}%
@@ -261,11 +261,11 @@ export function OrderTicket() {
         <button
           onClick={onSubmit}
           disabled={submitting || connecting}
-          className="relative mt-1 flex h-10 items-center justify-center rounded-md text-[13px] font-semibold tracking-wide text-base transition active:translate-y-px disabled:opacity-60"
+          className="focus-amber relative mt-1 flex h-10 items-center justify-center rounded-md text-[13px] font-semibold tracking-wide text-base transition hover:brightness-[1.06] active:translate-y-px disabled:opacity-60"
           style={{
             background: account ? accent : "var(--accent)",
-            color: "#05070A",
-            boxShadow: `0 6px 20px ${account ? (side === "buy" ? "rgba(14,203,129,0.25)" : "rgba(246,70,93,0.25)") : "rgba(52,210,195,0.25)"}`,
+            color: "var(--bg-0)",
+            boxShadow: `0 6px 20px ${account ? (side === "buy" ? "rgba(46,189,133,0.25)" : "rgba(246,70,93,0.25)") : "var(--accent-dim)"}`,
           }}
         >
           {submitting ? "Submitting…" : connecting ? "Connecting…" : submitLabel}
@@ -301,7 +301,7 @@ export function OrderTicket() {
               <button
                 onClick={fundWallet}
                 disabled={funding}
-                className="mt-1 rounded border border-border-glass px-2 py-1.5 text-[11px] text-accent transition hover:border-border-glass-2 hover:bg-accent/5 disabled:opacity-60"
+                className="focus-amber mt-1 rounded border border-border-glass px-2 py-1.5 text-[11px] text-accent transition hover:border-accent/40 hover:bg-accent/5 disabled:opacity-60"
               >
                 {funding ? "Funding…" : "Fund from localnet faucet"}
               </button>

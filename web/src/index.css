@@ -11,28 +11,66 @@
 @tailwind utilities;
 
 :root {
-  /* surfaces */
-  --bg-base: #05070a;
-  --bg-elev: #0a0e15;
-  --surface-glass: rgba(18, 24, 34, 0.55);
-  --surface-glass-2: rgba(20, 27, 38, 0.72);
-  --border-glass: rgba(150, 170, 200, 0.1);
-  --border-glass-2: rgba(150, 170, 200, 0.18);
-  /* text */
-  --text-primary: #e6edf5;
-  --text-secondary: #8a99ad;
-  --text-muted: #566678;
-  /* accents */
-  --accent: #34d2c3;
-  --accent-blue: #5b8def;
-  --amber: #f5a623;
-  /* market semantics */
-  --buy: #0ecb81;
-  --sell: #f6465d;
-  --buy-bg: rgba(14, 203, 129, 0.12);
+  /* ── PINNED design tokens (m1_5-ui-polish-contract §1) ─────────────────────
+     Single source of truth. Tailwind colors (tailwind.config.js) and every
+     inline `var(--…)` resolve here. */
+
+  /* Backdrop */
+  --bg-0: #0a0d12; /* deepest base */
+  --bg-1: #0e131a; /* app surface */
+  --bg-2: #131a23; /* raised */
+
+  /* Amber/gold accent — brand + interactive (NOT directional price) */
+  --accent: #e2a23b;
+  --accent-strong: #f4b84e;
+  --accent-dim: rgba(226, 162, 59, 0.14);
+  --accent-glow: rgba(226, 162, 59, 0.34);
+
+  /* Glass recipe (refined & subtle) */
+  --glass-bg: rgba(148, 163, 184, 0.06);
+  --glass-border: rgba(226, 232, 240, 0.1);
+  --glass-hi: rgba(255, 255, 255, 0.06); /* inner top highlight */
+  --glass-blur: 14px;
+  --glass-saturate: 130%;
+
+  /* Directional / financial — KEEP green-up, red-down (trader convention) */
+  --up: #2ebd85;
+  --down: #f6465d;
+
+  /* Text */
+  --text-hi: #e6edf3;
+  --text-lo: #9fb0c0;
+  --text-dim: #5c6b7a;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+
+  /* ── Legacy aliases → pinned tokens ──────────────────────────────────────
+     Existing components reference these names; aliasing keeps the re-skin
+     uniform without touching data/logic. */
+  --bg-base: var(--bg-0);
+  --bg-elev: var(--bg-1);
+  --surface-glass: var(--glass-bg);
+  --surface-glass-2: var(--glass-bg);
+  --border-glass: var(--glass-border);
+  --border-glass-2: var(--accent-dim);
+  --text-primary: var(--text-hi);
+  --text-secondary: var(--text-lo);
+  --text-muted: var(--text-dim);
+  --accent-blue: var(--text-lo); /* no competing blue — neutral */
+  --amber: var(--accent); /* amber IS the accent now */
+  --buy: var(--up);
+  --sell: var(--down);
+  --buy-bg: rgba(46, 189, 133, 0.12);
   --sell-bg: rgba(246, 70, 93, 0.12);
-  /* texture */
-  --grid-line: rgba(120, 140, 170, 0.06);
+
+  /* texture — faint cool grid */
+  --grid-line: rgba(160, 176, 200, 0.045);
+
+  /* elevation drop shadows (scale with GlassPanel elevation) */
+  --shadow-1: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 12px 34px rgba(0, 0, 0, 0.46);
+  --shadow-3: 0 22px 60px rgba(0, 0, 0, 0.58);
 
   color-scheme: dark;
 }
@@ -48,8 +86,8 @@
     margin: 0;
   }
   body {
-    background: var(--bg-base);
-    color: var(--text-primary);
+    background: var(--bg-0);
+    color: var(--text-hi);
     font-family: theme("fontFamily.sans");
     font-size: 13px;
     line-height: 1.4;
@@ -58,8 +96,8 @@
     overflow: hidden;
   }
   ::selection {
-    background: rgba(52, 210, 195, 0.28);
-    color: #fff;
+    background: var(--accent-glow);
+    color: #0a0d12;
   }
   /* thin terminal scrollbars */
   ::-webkit-scrollbar {
@@ -70,39 +108,186 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(120, 140, 170, 0.18);
+    background: rgba(159, 176, 192, 0.16);
     border-radius: 4px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(120, 140, 170, 0.3);
+    background: var(--accent-dim);
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(120, 140, 170, 0.2) transparent;
+    scrollbar-color: rgba(159, 176, 192, 0.18) transparent;
   }
 }
 
 @layer components {
-  /* The §1 glass recipe. */
-  .glass {
-    background: var(--surface-glass);
-    backdrop-filter: blur(20px) saturate(140%);
-    -webkit-backdrop-filter: blur(20px) saturate(140%);
-    border: 1px solid var(--border-glass);
-    border-radius: 12px;
+  /* ── The pinned glass recipe (contract §"GlassPanel API") ─────────────────
+     One refined-subtle frosted surface, three elevations. backdrop blur +
+     saturate, --glass-bg fill, a 1px *gradient* border (brighter top edge →
+     dim bottom), an inner top highlight (--glass-hi), and a soft drop shadow
+     that scales with elevation. The gradient border is painted by a masked
+     ::before so it survives over backdrop-filter. */
+  .glass-base {
+    position: relative;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border-radius: var(--radius);
     box-shadow:
-      0 10px 30px rgba(0, 0, 0, 0.45),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      var(--shadow-1),
+      inset 0 1px 0 var(--glass-hi);
+    transition:
+      background 180ms ease,
+      box-shadow 180ms ease,
+      border-color 180ms ease;
+  }
+  /* gradient border (top edge catches the light, fades toward the base) */
+  .glass-base::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      180deg,
+      var(--glass-border) 0%,
+      rgba(226, 232, 240, 0.04) 60%,
+      rgba(226, 232, 240, 0.02) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .glass-base > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* elevation 1 — base chrome (sidebar, status bar) */
+  .glass-1 {
+    box-shadow:
+      var(--shadow-1),
+      inset 0 1px 0 var(--glass-hi);
+  }
+  /* elevation 2 — content panels (book, chart, ticket) */
+  .glass-2 {
+    box-shadow:
+      var(--shadow-2),
+      inset 0 1px 0 var(--glass-hi);
+  }
+  /* elevation 3 — floating surfaces (dropdowns, modals): strongest */
+  .glass-3 {
+    background: color-mix(in srgb, var(--glass-bg) 70%, var(--bg-2) 30%);
+    backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(var(--glass-saturate));
+    box-shadow:
+      var(--shadow-3),
+      inset 0 1px 0 var(--glass-hi);
+  }
+
+  /* interactive surface — hover brightens + faint amber edge + pointer */
+  .glass-interactive {
+    cursor: pointer;
+  }
+  .glass-interactive:hover {
+    background: color-mix(in srgb, var(--glass-bg) 100%, #fff 4%);
+    box-shadow:
+      var(--shadow-2),
+      0 0 0 1px var(--accent-dim),
+      inset 0 1px 0 var(--glass-hi);
+  }
+
+  /* Legacy aliases used directly by panels — map to the new recipe so every
+     surface is uniform. .glass → elevation 1/2 chrome; .glass-2 stays the
+     stronger content/modal surface. */
+  .glass {
+    position: relative;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border-radius: var(--radius);
+    box-shadow:
+      var(--shadow-1),
+      inset 0 1px 0 var(--glass-hi);
+    transition:
+      background 180ms ease,
+      box-shadow 180ms ease,
+      border-color 180ms ease;
+  }
+  .glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      180deg,
+      var(--glass-border) 0%,
+      rgba(226, 232, 240, 0.04) 60%,
+      rgba(226, 232, 240, 0.02) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .glass > * {
+    position: relative;
+    z-index: 1;
   }
   .glass-2 {
-    background: var(--surface-glass-2);
-    backdrop-filter: blur(20px) saturate(140%);
-    -webkit-backdrop-filter: blur(20px) saturate(140%);
-    border: 1px solid var(--border-glass-2);
-    border-radius: 12px;
+    position: relative;
+    background: color-mix(in srgb, var(--glass-bg) 70%, var(--bg-2) 30%);
+    backdrop-filter: blur(calc(var(--glass-blur) + 3px)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 3px)) saturate(var(--glass-saturate));
+    border-radius: var(--radius);
     box-shadow:
-      0 16px 44px rgba(0, 0, 0, 0.55),
-      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      var(--shadow-2),
+      inset 0 1px 0 var(--glass-hi);
+    transition:
+      background 180ms ease,
+      box-shadow 180ms ease,
+      border-color 180ms ease;
+  }
+  .glass-2::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      180deg,
+      rgba(226, 232, 240, 0.14) 0%,
+      rgba(226, 232, 240, 0.05) 55%,
+      rgba(226, 232, 240, 0.02) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .glass-2 > * {
+    position: relative;
+    z-index: 1;
   }
 
   /* uppercase, letter-spaced micro labels */
@@ -129,10 +314,10 @@
     border-radius: 999px;
     background: linear-gradient(
       to right,
-      var(--accent, #34d2c3) 0%,
-      var(--accent, #34d2c3) var(--sel, 0%),
-      rgba(150, 170, 200, 0.16) var(--sel, 0%),
-      rgba(150, 170, 200, 0.16) 100%
+      var(--accent, #e2a23b) 0%,
+      var(--accent, #e2a23b) var(--sel, 0%),
+      rgba(159, 176, 192, 0.16) var(--sel, 0%),
+      rgba(159, 176, 192, 0.16) 100%
     );
     outline: none;
     cursor: pointer;
@@ -143,19 +328,33 @@
     width: 13px;
     height: 13px;
     border-radius: 50%;
-    background: #e6edf5;
-    border: 2px solid var(--accent, #34d2c3);
-    box-shadow: 0 0 8px rgba(52, 210, 195, 0.45);
+    background: var(--text-hi);
+    border: 2px solid var(--accent, #e2a23b);
+    box-shadow: 0 0 8px var(--accent-glow);
     cursor: pointer;
   }
   .gix-range::-moz-range-thumb {
     width: 13px;
     height: 13px;
     border-radius: 50%;
-    background: #e6edf5;
-    border: 2px solid var(--accent, #34d2c3);
-    box-shadow: 0 0 8px rgba(52, 210, 195, 0.45);
+    background: var(--text-hi);
+    border: 2px solid var(--accent, #e2a23b);
+    box-shadow: 0 0 8px var(--accent-glow);
     cursor: pointer;
+  }
+
+  /* amber focus ring — applied to interactive controls (contract §4) */
+  .focus-amber {
+    outline: none;
+    transition:
+      box-shadow 150ms ease,
+      border-color 150ms ease;
+  }
+  .focus-amber:focus-visible {
+    box-shadow:
+      0 0 0 1px var(--accent-glow),
+      0 0 0 4px var(--accent-dim);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   }
 }
 

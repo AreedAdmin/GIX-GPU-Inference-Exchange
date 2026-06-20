@@ -96,8 +96,12 @@ export function AppShell() {
           </button>
           <button
             onClick={() => setDrawer("ticket")}
-            className="pointer-events-auto rounded-full px-4 py-2 text-[12px] font-medium text-base"
-            style={{ background: "var(--accent)", color: "#05070A" }}
+            className="pointer-events-auto rounded-full px-4 py-2 text-[12px] font-medium text-base transition hover:brightness-[1.06]"
+            style={{
+              background: "var(--accent)",
+              color: "var(--bg-0)",
+              boxShadow: "0 6px 20px var(--accent-dim)",
+            }}
           >
             Trade
           </button>

@@ -33,7 +33,7 @@ export function PositionsPanel() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`relative flex items-center gap-1.5 rounded px-3 py-1.5 text-[12px] transition ${
+              className={`focus-amber relative flex items-center gap-1.5 rounded px-3 py-1.5 text-[12px] transition ${
                 active
                   ? "text-primary"
                   : "text-muted hover:text-secondary"
@@ -44,8 +44,8 @@ export function PositionsPanel() {
                 <span
                   className="num inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9.5px]"
                   style={{
-                    background: active ? "var(--accent)" : "rgba(150,170,200,0.16)",
-                    color: active ? "#05070A" : "var(--text-secondary)",
+                    background: active ? "var(--accent)" : "rgba(159,176,192,0.16)",
+                    color: active ? "var(--bg-0)" : "var(--text-secondary)",
                   }}
                 >
                   {badge}
@@ -208,7 +208,7 @@ function Lifecycle({ state }: { state: JobState }) {
         {STAGES.map((_, i) => {
           const done = i <= idx;
           const isHead = i === idx && active;
-          let bg = "rgba(150,170,200,0.16)";
+          let bg = "rgba(159,176,192,0.16)";
           if (done) bg = endColor;
           return (
             <span

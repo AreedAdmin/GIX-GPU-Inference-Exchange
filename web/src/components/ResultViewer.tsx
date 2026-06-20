@@ -37,7 +37,7 @@ export function ResultViewer() {
       <div className="absolute inset-0 bg-black/55 backdrop-blur-sm animate-fade-in" />
 
       <div
-        className="glass-2 relative z-10 flex max-h-[82vh] w-full max-w-2xl animate-fade-in flex-col overflow-hidden rounded-glass"
+        className="glass-base glass-3 relative z-10 flex max-h-[82vh] w-full max-w-2xl animate-slide-in flex-col overflow-hidden rounded-glass"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* header */}
@@ -54,7 +54,7 @@ export function ResultViewer() {
             {r && <VerifiedBadge ok={r.verified} />}
             <button
               onClick={closeResult}
-              className="rounded p-1 text-muted transition hover:text-primary"
+              className="focus-amber rounded p-1 text-muted transition hover:text-primary"
               aria-label="Close"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -82,7 +82,7 @@ export function ResultViewer() {
               </p>
               <button
                 onClick={() => fetchResult(jobId)}
-                className="rounded border border-border-glass px-3 py-1.5 text-[11px] text-accent transition hover:border-accent/50"
+                className="focus-amber rounded border border-border-glass px-3 py-1.5 text-[11px] text-accent transition hover:border-accent/50 hover:bg-accent/5"
               >
                 Retry
               </button>
@@ -140,7 +140,7 @@ export function ResultViewer() {
                     href={exUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-[11.5px] text-accent-blue transition hover:underline"
+                    className="inline-flex items-center gap-1.5 text-[11.5px] text-accent transition hover:text-accent-strong hover:underline"
                   >
                     View on-chain payment
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

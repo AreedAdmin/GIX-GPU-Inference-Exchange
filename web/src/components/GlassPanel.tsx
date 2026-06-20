@@ -1,29 +1,58 @@
-import type { ReactNode } from "react";
+import type { ElementType, ReactNode } from "react";
+
+type Elevation = 1 | 2 | 3;
 
 interface GlassPanelProps {
   children: ReactNode;
+  /**
+   * 1 = base chrome (sidebar, status bar)
+   * 2 = content panels (book, chart, ticket)
+   * 3 = floating surfaces (dropdowns, modals) — strongest blur + border + shadow
+   */
+  elevation?: Elevation;
+  /** hover brighten + faint amber edge + pointer */
+  interactive?: boolean;
+  /** render as a different element (default <section>) */
+  as?: ElementType;
   className?: string;
-  /** stronger surface (tickets, modals) — surface-glass-2 + border-glass-2 */
-  strong?: boolean;
-  /** flush the body padding (e.g. tables manage their own) */
-  flush?: boolean;
+  /** optional chrome header — kept for panels that want a built-in title row */
   title?: ReactNode;
   right?: ReactNode;
+  /** flush the body padding (e.g. tables manage their own) */
+  flush?: boolean;
 }
 
-/** The §1 glass primitive. A frosted panel floating over the obsidian field. */
+const ELEV_CLASS: Record<Elevation, string> = {
+  1: "glass glass-1",
+  2: "glass-2",
+  3: "glass-3",
+};
+
+/**
+ * The pinned glass primitive (m1_5-ui-polish-contract §"GlassPanel API").
+ * A refined, subtle frosted surface floating over the amber-tinted obsidian
+ * field: backdrop blur + saturate, --glass-bg fill, a 1px gradient border, an
+ * inner top highlight (--glass-hi), and a soft drop shadow that scales with
+ * elevation. `interactive` adds a hover state (brighter bg + faint amber edge)
+ * and a pointer cursor.
+ */
 export function GlassPanel({
   children,
+  elevation = 2,
+  interactive = false,
+  as,
   className = "",
-  strong = false,
-  flush = false,
   title,
   right,
+  flush = false,
 }: GlassPanelProps) {
+  const Tag = (as ?? "section") as ElementType;
   return (
-    <section
+    <Tag
       className={`relative flex min-h-0 flex-col overflow-hidden ${
-        strong ? "glass-2" : "glass"
+        elevation === 3 ? "glass-base " : ""
+      }${ELEV_CLASS[elevation]} ${
+        interactive ? "glass-interactive" : ""
       } ${className}`}
     >
       {(title || right) && (
@@ -39,6 +68,6 @@ export function GlassPanel({
       <div className={`flex min-h-0 flex-1 flex-col ${flush ? "" : "p-3"}`}>
         {children}
       </div>
-    </section>
+    </Tag>
   );
 }

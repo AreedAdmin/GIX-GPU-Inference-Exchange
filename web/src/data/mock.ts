@@ -55,6 +55,16 @@ function mkMarket(
 }
 
 const MARKETS: SimMarket[] = [
+  // Live demo market — the GB10 (DGX Spark) provider serving qwen3.6:35b.
+  // Headline market; its Credit/USDC DeepBook pool is created once test DEEP lands.
+  mkMarket(
+    "mkt-gb10-qwen3-35b",
+    "GB10-qwen3.6-35b",
+    0.0042,
+    0.0011,
+    1000,
+    30000,
+  ),
   mkMarket(
     "0x816c8da0ce624cb62e84948bad3fe1fad60a8aa945d85661b29bcd73dffc55b1",
     "H100-llama3.1-8b-int8",

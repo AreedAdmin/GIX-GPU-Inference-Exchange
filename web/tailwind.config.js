@@ -4,25 +4,30 @@ export default {
   theme: {
     extend: {
       colors: {
+        // All driven by the pinned :root tokens (single source of truth in
+        // src/index.css). Tailwind utilities resolve to the same vars the inline
+        // styles use, so the amber/gold re-skin is uniform.
         // surfaces
-        base: "#05070A",
-        elev: "#0A0E15",
-        glass: "rgba(18, 24, 34, 0.55)",
-        "glass-2": "rgba(20, 27, 38, 0.72)",
-        "border-glass": "rgba(150, 170, 200, 0.10)",
-        "border-glass-2": "rgba(150, 170, 200, 0.18)",
+        base: "var(--bg-0)",
+        elev: "var(--bg-1)",
+        "bg-2": "var(--bg-2)",
+        glass: "var(--glass-bg)",
+        "glass-2": "var(--glass-bg)",
+        "border-glass": "var(--glass-border)",
+        "border-glass-2": "var(--accent-dim)",
         // text
-        primary: "#E6EDF5",
-        secondary: "#8A99AD",
-        muted: "#566678",
-        // accents (Palantir cool)
-        accent: "#34D2C3",
-        "accent-blue": "#5B8DEF",
-        amber: "#F5A623",
-        // market semantics (Binance-exact)
-        buy: "#0ECB81",
-        sell: "#F6465D",
-        "buy-bg": "rgba(14, 203, 129, 0.12)",
+        primary: "var(--text-hi)",
+        secondary: "var(--text-lo)",
+        muted: "var(--text-dim)",
+        // amber/gold accent — brand + interactive (NOT directional price)
+        accent: "var(--accent)",
+        "accent-strong": "var(--accent-strong)",
+        "accent-blue": "var(--text-lo)", // legacy alias → neutral (no competing blue)
+        amber: "var(--accent)", // legacy alias → the amber accent
+        // directional / financial — KEEP green-up, red-down
+        buy: "var(--up)",
+        sell: "var(--down)",
+        "buy-bg": "rgba(46, 189, 133, 0.12)",
         "sell-bg": "rgba(246, 70, 93, 0.12)",
       },
       fontFamily: {
@@ -49,17 +54,19 @@ export default {
         base: ["13px", "18px"],
       },
       borderRadius: {
-        glass: "12px",
+        glass: "var(--radius)",
+        "glass-sm": "var(--radius-sm)",
       },
       boxShadow: {
         glass:
-          "0 10px 30px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)",
+          "0 10px 30px rgba(0,0,0,0.45), inset 0 1px 0 var(--glass-hi)",
         "glass-2":
-          "0 16px 44px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05)",
-        "accent-glow": "0 0 0 1px rgba(52,210,195,0.35), 0 0 18px rgba(52,210,195,0.18)",
+          "0 16px 44px rgba(0,0,0,0.55), inset 0 1px 0 var(--glass-hi)",
+        "accent-glow":
+          "0 0 0 1px var(--accent-glow), 0 0 18px var(--accent-dim)",
       },
       backdropBlur: {
-        glass: "20px",
+        glass: "var(--glass-blur)",
       },
       keyframes: {
         "pulse-dot": {
@@ -67,12 +74,17 @@ export default {
           "50%": { opacity: "0.35", transform: "scale(0.82)" },
         },
         "flash-buy": {
-          "0%": { backgroundColor: "rgba(14, 203, 129, 0.28)" },
-          "100%": { backgroundColor: "rgba(14, 203, 129, 0)" },
+          "0%": { backgroundColor: "rgba(46, 189, 133, 0.26)" },
+          "100%": { backgroundColor: "rgba(46, 189, 133, 0)" },
         },
         "flash-sell": {
-          "0%": { backgroundColor: "rgba(246, 70, 93, 0.28)" },
+          "0%": { backgroundColor: "rgba(246, 70, 93, 0.26)" },
           "100%": { backgroundColor: "rgba(246, 70, 93, 0)" },
+        },
+        // amber last-price / selection flash (brand accent, not directional)
+        "flash-accent": {
+          "0%": { backgroundColor: "rgba(226, 162, 59, 0.28)" },
+          "100%": { backgroundColor: "rgba(226, 162, 59, 0)" },
         },
         "slide-in": {
           "0%": { opacity: "0", transform: "translateY(-6px)" },
@@ -86,13 +98,20 @@ export default {
           "0%": { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" },
         },
+        // very slow, faint breathing of the background amber glow
+        "glow-drift": {
+          "0%, 100%": { opacity: "0.85", transform: "translateX(-50%) scale(1)" },
+          "50%": { opacity: "1", transform: "translateX(-50%) scale(1.05)" },
+        },
       },
       animation: {
         "pulse-dot": "pulse-dot 1.6s ease-in-out infinite",
         "flash-buy": "flash-buy 600ms ease-out",
         "flash-sell": "flash-sell 600ms ease-out",
+        "flash-accent": "flash-accent 600ms ease-out",
         "slide-in": "slide-in 280ms ease-out",
         "fade-in": "fade-in 220ms ease-out",
+        "glow-drift": "glow-drift 18s ease-in-out infinite",
       },
     },
   },

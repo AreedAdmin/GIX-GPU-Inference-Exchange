@@ -27,8 +27,11 @@ export function TopBar() {
       {/* wordmark */}
       <div className="flex items-center gap-2 pr-2">
         <span
-          className="num text-[18px] font-semibold tracking-[0.18em]"
-          style={{ color: "var(--text-primary)" }}
+          className="num bg-clip-text text-[18px] font-semibold tracking-[0.18em] text-transparent"
+          style={{
+            backgroundImage:
+              "linear-gradient(180deg, var(--accent-strong), var(--accent))",
+          }}
         >
           GIX
         </span>
@@ -48,7 +51,7 @@ export function TopBar() {
       <div ref={ref} className="relative">
         <button
           onClick={() => setOpen((v) => !v)}
-          className="group flex items-center gap-2 rounded-md border border-border-glass bg-elev/60 px-3 py-1.5 text-left transition hover:border-border-glass-2"
+          className="group focus-amber flex items-center gap-2 rounded-md border border-border-glass bg-elev/60 px-3 py-1.5 text-left transition hover:border-accent/40 hover:bg-accent/[0.04]"
         >
           <span className="num text-[13px] font-medium text-primary">
             {market?.name ?? "—"}
@@ -67,7 +70,7 @@ export function TopBar() {
           </svg>
         </button>
         {open && (
-          <div className="absolute left-0 top-[calc(100%+6px)] z-40 w-72 animate-fade-in glass-2 rounded-lg p-1">
+          <div className="glass-base glass-3 absolute left-0 top-[calc(100%+6px)] z-40 w-72 animate-slide-in rounded-glass p-1">
             {markets.map((m) => {
               const sel = m.id === activeMarketId;
               const mu = m.change24h >= 0;
@@ -179,12 +182,8 @@ function Tile({
     <div className="flex shrink-0 flex-col leading-tight">
       <span className="label-micro whitespace-nowrap">{label}</span>
       <span
-        className={`num text-[13px] font-medium tabnum transition-colors ${
-          flash === "up"
-            ? "animate-flash-buy"
-            : flash === "down"
-              ? "animate-flash-sell"
-              : ""
+        className={`num -mx-1 rounded-glass-sm px-1 text-[13px] font-medium tabnum transition-colors ${
+          flash ? "animate-flash-accent" : ""
         }`}
         style={{ color: color ?? "var(--text-primary)" }}
       >
