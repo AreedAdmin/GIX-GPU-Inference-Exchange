@@ -1,22 +1,23 @@
 {
   "network": "localnet",
-  "packageId": "0x91bca1cd13a5131119467e8bf4867f76ab1c12fcc7200f8c0bbf3acd9dee72ee",
-  "configId": "0xc48c29e3dec0089382ab57149da931105f5ac5f60271a6b007356595685fb6c3",
-  "adminCapId": "0x882cf035dc73106c9f94cfade4c5d894541cca6ff5a288bdd8fbc7da0e5ca381",
-  "allowlistId": "0xc4930c3d701579c3544a67dd44bfa0adb5379a014db62945fd15852f7c2c9b18",
-  "treasuryId": "0x4e6af1a6b80e7f206a8099288ed240ed79203911b8e28e603b5f87853b29b75a",
-  "faucetId": "0x1a290a06864e188fca32bd823ad1bc92d602d7ddb1b8075ac8c2024db170c807",
-  "usdcType": "0x91bca1cd13a5131119467e8bf4867f76ab1c12fcc7200f8c0bbf3acd9dee72ee::mock_usdc::MOCK_USDC",
+  "packageId": "0xc3bb6a23f7ca3b52ff86f05265dbd0a53ea0dbe928ef1be984bbfac6af5d0418",
+  "configId": "0x619b5a957bf4dd1557492a1b43be34b64b212b208f9df35aa3454a1a0d2e9718",
+  "adminCapId": "0xb68cfdcb5897010e57d143dc20d4ea4650c2239ce65d467e457b7cc1ce947b95",
+  "allowlistId": "0x2a1812261e90dbde5ce1bd5a80230723e2a0307fbd15e25c39e1152a41eb078d",
+  "treasuryId": "0xf8fe00b224766e113d6d91070e18ce6816785ced14c931f239a250ab480fe02d",
+  "faucetId": "0x6625e97ec3c0beab19abea2ce0a7bf7d78bb0f3d42e3a3dfbbc50573e611ceab",
+  "usdcType": "0xc3bb6a23f7ca3b52ff86f05265dbd0a53ea0dbe928ef1be984bbfac6af5d0418::mock_usdc::MOCK_USDC",
   "clockId": "0x6",
+  "mockMeasurement": "MOCK-tdx-llama8b-v1",
   "markets": [
     {
-      "id": "0x816c8da0ce624cb62e84948bad3fe1fad60a8aa945d85661b29bcd73dffc55b1",
+      "id": "0x1083baa639013405f106464cae7628c2a0e02e31ca4149baca279fee1a58e49a",
       "name": "H100-llama3.1-8b-int8",
-      "creditType": "0x91bca1cd13a5131119467e8bf4867f76ab1c12fcc7200f8c0bbf3acd9dee72ee::markets::M_H100_LLAMA8B",
-      "creditCoinType": "0x91bca1cd13a5131119467e8bf4867f76ab1c12fcc7200f8c0bbf3acd9dee72ee::credit::Credit<0x91bca1cd13a5131119467e8bf4867f76ab1c12fcc7200f8c0bbf3acd9dee72ee::markets::M_H100_LLAMA8B>",
-      "modelId": "0x8266691ba5652e694d978f83fefbc9edc5028949f8523fa65c11773264e69d34",
+      "creditType": "0xc3bb6a23f7ca3b52ff86f05265dbd0a53ea0dbe928ef1be984bbfac6af5d0418::markets::M_H100_LLAMA8B",
+      "creditCoinType": "0xc3bb6a23f7ca3b52ff86f05265dbd0a53ea0dbe928ef1be984bbfac6af5d0418::credit::Credit<0xc3bb6a23f7ca3b52ff86f05265dbd0a53ea0dbe928ef1be984bbfac6af5d0418::markets::M_H100_LLAMA8B>",
+      "modelId": "0x4bcd9edcfed9d2aff34bb1da63858db6f51914769d77ffe6aee74716993dd29b",
       "scuTokens": 1000,
-      "slaP99Ms": 5000
+      "slaP99Ms": 30000
     }
   ],
   "accounts": {
@@ -27,6 +28,5 @@
     "consumers": [
       "0xb8e7af9d7be92710d38b1f867c6bc99db9171e47d7bc1afef87ba8a4350ee4e7"
     ]
-  },
-  "mockMeasurement": "MOCK-tdx-llama8b-v1"
+  }
 }
