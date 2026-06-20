@@ -1,0 +1,29 @@
+{
+  "name": "@gix/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GIX OpenAI-compatible gateway — drop-in /v1/chat/completions served by a decentralized GPU, settled on-chain.",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "gix-gateway": "./dist/server.js"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@gix/sdk": "file:../../sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
