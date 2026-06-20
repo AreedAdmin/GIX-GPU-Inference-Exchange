@@ -1,0 +1,33 @@
+{
+  "network": "testnet",
+  "packageId": "0x0ed255b19e62f034d3c38130959bf94e459e48b7fb4296d57ac42b1a34c93f0f",
+  "configId": "0x62196c60ec799ed6346fa1a6df6ee57e5bc80b92ada2fc10a0c28c2f9358cb90",
+  "adminCapId": "0x6154734a1a781e474604c20818c4e9f3a86f24edc75a29423d73a0b5be9fd909",
+  "allowlistId": "0xa16bfb3b52033d36b73f9315d8545c6867f941c582db79658d527cdbff4164e1",
+  "treasuryId": "0x6b18b61c0e8139fd76cc946c4abe5113589d1e27726f59ceb1455dccadeaa990",
+  "faucetId": "0xa5a1f7ed2b01a102170b67f1d4897d7dc9468f2bfad699509a867d44ad7327dc",
+  "usdcType": "0x0ed255b19e62f034d3c38130959bf94e459e48b7fb4296d57ac42b1a34c93f0f::mock_usdc::MOCK_USDC",
+  "clockId": "0x6",
+  "mockMeasurement": "MOCK-tdx-llama8b-v1",
+  "markets": [
+    {
+      "id": "0x87594aa7864d47c633d27017cf02c1af85a6be6e5415a4ff0babeebb51a68ea7",
+      "name": "H100-llama3.1-8b-int8",
+      "creditType": "0x0ed255b19e62f034d3c38130959bf94e459e48b7fb4296d57ac42b1a34c93f0f::markets::M_H100_LLAMA8B",
+      "creditCoinType": "0x0ed255b19e62f034d3c38130959bf94e459e48b7fb4296d57ac42b1a34c93f0f::credit::Credit<0x0ed255b19e62f034d3c38130959bf94e459e48b7fb4296d57ac42b1a34c93f0f::markets::M_H100_LLAMA8B>",
+      "modelId": "0x31547387a024914a441d8129bd3fd1d0770a251c82f7e296a6ca3e0779cab3fa",
+      "scuTokens": 1000,
+      "slaP99Ms": 30000,
+      "deepbookPoolId": null
+    }
+  ],
+  "accounts": {
+    "admin": "0xb8e7af9d7be92710d38b1f867c6bc99db9171e47d7bc1afef87ba8a4350ee4e7",
+    "providers": [
+      "0xb8e7af9d7be92710d38b1f867c6bc99db9171e47d7bc1afef87ba8a4350ee4e7"
+    ],
+    "consumers": [
+      "0xb8e7af9d7be92710d38b1f867c6bc99db9171e47d7bc1afef87ba8a4350ee4e7"
+    ]
+  }
+}
