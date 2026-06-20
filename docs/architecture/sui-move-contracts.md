@@ -44,6 +44,13 @@ preferences; each one is load-bearing for the goals in the [overview](overview.m
    can be split, joined, and moved but never copied or dropped. The type system
    makes "create money from nothing" unrepresentable. See §9.
 
+   > **The quote coin is a generic phantom `Q`, not a hardcoded `USDC`.** USDC remains
+   > *the* canonical quote/settlement/bond asset, but `gix::escrow`, `gix::staking`,
+   > `gix::settlement`, and refunds are written over `Coin<Q>` / `Balance<Q>` and `Q` is
+   > instantiated **per network**: `MOCK_USDC` (localnet), **`DBUSDC`** (testnet), real
+   > USDC (mainnet) — see [overview §5.1](overview.md). The `Balance<USDC>` in every sketch
+   > below is shorthand for `Balance<Q>`; one codebase serves all three networks.
+
 5. **Upgradeability-first.** Every shared object carries an on-chain `version` field;
    every entry function asserts it; governance gates the Sui package upgrade. We
    assume the package *will* be upgraded and design migrations from day one. See §11.

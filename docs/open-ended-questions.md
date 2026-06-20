@@ -54,6 +54,17 @@ this file is only for things that genuinely need you.
   for v1 and de-fangs **T-ECON-4/T-ECON-6**; it also moots the GIX-payout question in **D1**
   (v1 compensation is USDC). Propagated to overview §1/§4/§5, glossary, tokenomics (banner,
   §1, §3, §8), threat-model §13/§14, sui-move-contracts, roadmap.
+- **Per-network quote dollar + SUI→USD on-ramp (2026-06):** USDC stays *the* canonical
+  quote/settlement/bond asset; the contracts **parameterize** it as a generic phantom `Q`,
+  instantiated **`MOCK_USDC` (localnet) / `DBUSDC` (testnet) / real Circle USDC (mainnet)**.
+  DBUSDC (DeepBook's testnet USD) is the testnet stand-in because real USDC has **no liquid
+  DeepBook *testnet* pool** — testnet txns are nonetheless real on-chain. This supersedes the
+  earlier MOCK_USDC-as-testnet-quote framing (MOCK_USDC is now localnet-only). Plus an in-app
+  **SUI→USD on-ramp** (utility swap, not a DEX) on an **existing** DeepBook pool
+  (`SUI_DBUSDC` testnet / `SUI_USDC` mainnet) — **no DEEP**, demonstrates DeepBook live now,
+  distinct from the DEEP-gated `Credit/Q` compute pool. Design:
+  [onramp-dbusdc-plan.md](onramp-dbusdc-plan.md). Propagated to overview §5.1, glossary
+  (USDC/DBUSDC/Quote coin/On-ramp), deepbook §1/§13, tokenomics §2, roadmap Phase 3.
 - **Verification hardware (2026-06):** v1 CPU TEE = **Intel TDX (P-256) only** (Sui has no
   native P-384); **AMD SEV-SNP deferred**; **on-chain NVIDIA GPU-CC/NRAS verification
   phased to a post-MVP fast-follow**. (verification-attestation.md §4, §9)
