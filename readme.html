@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>GIX — GPU Inference Exchange · Investor Brief</title>
+<meta name="description" content="GIX is a decentralized spot market for verifiable GPU inference, settled on Sui. Match on DeepBook, verify with TEE attestation, settle in USDC with a Walrus audit trail."/>
+<style>
+  :root{
+    --bg:#ffffff; --panel:#f7f8fa; --ink:#0e1116; --ink2:#3a424e;
+    --mute:#79828f; --line:#e4e8ed; --line2:#d2d8e0; --accent:#2d5be3;
+    --accent-soft:#eaf0ff; --radius:14px;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:Inter,"Helvetica Neue",Arial,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family:var(--sans); color:var(--ink); background:var(--bg);
+    background-image:radial-gradient(rgba(13,18,28,.045) 1px, transparent 1px);
+    background-size:22px 22px; display:flex; flex-direction:column;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* progress */
+  #progress{position:fixed;top:0;left:0;height:3px;background:var(--accent);width:0;transition:width .35s ease;z-index:50}
+  /* topbar */
+  header.bar{
+    display:flex;align-items:center;gap:16px;padding:18px 28px;
+    border-bottom:1px solid var(--line);background:rgba(255,255,255,.85);
+    backdrop-filter:saturate(1.2) blur(6px);position:sticky;top:0;z-index:30;
+  }
+  .wm{font-weight:800;letter-spacing:2px;font-size:18px}
+  .wm .dot{color:var(--accent)}
+  .tag{font-family:var(--mono);font-size:11.5px;letter-spacing:2.5px;color:var(--mute);
+       border:1px solid var(--line2);border-radius:999px;padding:5px 11px}
+  .bar .spacer{flex:1}
+  .bar a,.iconbtn{font-family:var(--mono);font-size:12px;letter-spacing:.5px;color:var(--ink2);
+       text-decoration:none;border:1px solid var(--line2);border-radius:8px;padding:7px 12px;background:#fff;cursor:pointer}
+  .bar a:hover,.iconbtn:hover{border-color:var(--accent);color:var(--accent)}
+  /* stage */
+  main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px 24px 12px;gap:18px}
+  .frame{
+    position:relative;width:min(1120px,94vw);aspect-ratio:16/9;background:#fff;
+    border:1px solid var(--line2);border-radius:var(--radius);overflow:hidden;
+    box-shadow:0 1px 0 rgba(13,18,28,.04),0 18px 50px -28px rgba(13,18,28,.32);
+  }
+  .frame img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;
+    transition:opacity .35s ease;background:#fff}
+  .frame img.active{opacity:1}
+  .clickzone{position:absolute;inset:0;display:flex;z-index:5}
+  .clickzone .prev{flex:0 0 28%;cursor:w-resize}
+  .clickzone .next{flex:1;cursor:e-resize}
+  /* controls */
+  .controls{display:flex;align-items:center;gap:18px}
+  .nav{width:42px;height:42px;border-radius:50%;border:1px solid var(--line2);background:#fff;
+    color:var(--ink);font-size:18px;cursor:pointer;display:grid;place-items:center;transition:.15s}
+  .nav:hover{border-color:var(--accent);color:var(--accent)}
+  .nav:disabled{opacity:.35;cursor:default;border-color:var(--line)}
+  .dots{display:flex;gap:9px}
+  .dots button{width:9px;height:9px;border-radius:50%;border:0;background:var(--line2);cursor:pointer;padding:0;transition:.2s}
+  .dots button.on{background:var(--accent);transform:scale(1.25)}
+  .counter{font-family:var(--mono);font-size:12.5px;color:var(--mute);letter-spacing:1px;min-width:64px;text-align:center}
+  .cap{font-family:var(--mono);font-size:12px;color:var(--mute);letter-spacing:1.5px;text-transform:uppercase}
+  footer{padding:14px 28px;border-top:1px solid var(--line);display:flex;gap:18px;align-items:center;
+    font-family:var(--mono);font-size:11.5px;color:var(--mute);letter-spacing:.5px}
+  footer .spacer{flex:1}
+  footer a{color:var(--mute);text-decoration:none;border-bottom:1px dotted var(--line2)}
+  footer a:hover{color:var(--accent)}
+  .hint{font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:1px}
+  @media (max-width:640px){.tag,.hint{display:none}.wm{font-size:16px}}
+</style>
+</head>
+<body>
+  <div id="progress"></div>
+
+  <header class="bar">
+    <span class="wm">GIX<span class="dot">.</span></span>
+    <span class="tag">INVESTOR&nbsp;BRIEF</span>
+    <span class="spacer"></span>
+    <span class="hint">← → to navigate</span>
+    <button class="iconbtn" id="fs" title="Fullscreen">⛶&nbsp;Fullscreen</button>
+    <a href="https://github.com/AreedAdmin/GIX-GPU-Inference-Exchange" target="_blank" rel="noopener">GitHub ↗</a>
+  </header>
+
+  <main>
+    <div class="frame" id="frame">
+      <img class="active" src="assets/01-cover.svg"        alt="GIX — the spot market for GPU inference, settled on Sui."/>
+      <img               src="assets/02-architecture.svg"  alt="GIX architecture: demand and supply meet on DeepBook; Sui escrows, verifies attestation, and settles; Walrus stores artifacts."/>
+      <img               src="assets/03-lifecycle.svg"     alt="Job lifecycle and trust: pass settles and pays the provider; fail refunds and slashes. Four checks verified on-chain."/>
+      <img               src="assets/04-product.svg"       alt="Key functionality: drop-in OpenAI-compatible API over verifiable, neutral, pay-per-inference compute."/>
+      <img               src="assets/05-status.svg"        alt="Status and roadmap: built end-to-end, live on Sui testnet through milestone M2."/>
+      <div class="clickzone"><div class="prev" id="cz-prev"></div><div class="next" id="cz-next"></div></div>
+    </div>
+
+    <div class="controls">
+      <button class="nav" id="prev" aria-label="Previous slide">‹</button>
+      <div class="dots" id="dots"></div>
+      <span class="counter" id="counter">01 / 05</span>
+      <button class="nav" id="next" aria-label="Next slide">›</button>
+    </div>
+    <div class="cap" id="cap">Cover</div>
+  </main>
+
+  <footer>
+    <span>GPU INFERENCE EXCHANGE</span>
+    <span class="spacer"></span>
+    <span>SUI · DEEPBOOK · WALRUS</span>
+    <a href="docs/README.md">Docs ↗</a>
+    <a href="DEMO.md">Demo runbook ↗</a>
+  </footer>
+
+<script>
+  const titles = ["Cover", "Architecture", "Lifecycle & Trust", "Key Functionality", "Status & Roadmap"];
+  const imgs   = [...document.querySelectorAll('.frame img')];
+  const dotsEl = document.getElementById('dots');
+  const counter= document.getElementById('counter');
+  const capEl  = document.getElementById('cap');
+  const prevB  = document.getElementById('prev');
+  const nextB  = document.getElementById('next');
+  const prog   = document.getElementById('progress');
+  let i = 0; const n = imgs.length;
+
+  titles.forEach((_, k)=>{
+    const b=document.createElement('button');
+    b.setAttribute('aria-label','Go to slide '+(k+1));
+    b.onclick=()=>go(k); dotsEl.appendChild(b);
+  });
+  const dots=[...dotsEl.children];
+
+  function pad(x){return String(x+1).padStart(2,'0')}
+  function render(){
+    imgs.forEach((im,k)=>im.classList.toggle('active',k===i));
+    dots.forEach((d,k)=>d.classList.toggle('on',k===i));
+    counter.textContent = pad(i)+" / "+pad(n-1);
+    capEl.textContent = titles[i];
+    prevB.disabled = i===0; nextB.disabled = i===n-1;
+    prog.style.width = ((i)/(n-1))*100 + "%";
+  }
+  function go(k){ i=Math.max(0,Math.min(n-1,k)); render(); }
+  function next(){ go(i+1) } function prev(){ go(i-1) }
+
+  prevB.onclick=prev; nextB.onclick=next;
+  document.getElementById('cz-next').onclick=next;
+  document.getElementById('cz-prev').onclick=prev;
+  addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){e.preventDefault();next()}
+    if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();prev()}
+    if(e.key==='Home')go(0); if(e.key==='End')go(n-1);
+  });
+  document.getElementById('fs').onclick=()=>{
+    if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  };
+  render();
+</script>
+</body>
+</html>
