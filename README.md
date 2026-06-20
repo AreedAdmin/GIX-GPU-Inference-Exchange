@@ -4,7 +4,7 @@
 
 <br/>
 
-**A decentralized spot market for *verifiable* GPU inference — settled on Sui.**
+<h2 align="center">A decentralized spot market for <em>verifiable</em> GPU inference — settled on Sui.</h2>
 
 [![status](https://img.shields.io/badge/status-live%20on%20testnet-2D5BE3?style=flat-square)](docs/roadmap.md)
 [![milestone](https://img.shields.io/badge/milestone-M2%20·%20DeepBook%20%2B%20Walrus-1F9D6B?style=flat-square)](docs/m2-scope.md)
