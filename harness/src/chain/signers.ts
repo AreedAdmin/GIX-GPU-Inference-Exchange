@@ -35,8 +35,8 @@ function exportPrivateKey(address: string): string | null {
 
 /** Build a Keypair from a bech32 `suiprivkey1…` string, honoring its scheme. */
 function keypairFromBech32(bech32: string): Keypair {
-  const { schema, secretKey } = decodeSuiPrivateKey(bech32);
-  switch (schema) {
+  const { scheme, secretKey } = decodeSuiPrivateKey(bech32);
+  switch (scheme) {
     case "ED25519":
       return Ed25519Keypair.fromSecretKey(secretKey);
     case "Secp256k1":
@@ -44,7 +44,7 @@ function keypairFromBech32(bech32: string): Keypair {
     case "Secp256r1":
       return Secp256r1Keypair.fromSecretKey(secretKey);
     default:
-      throw new Error(`unsupported key scheme ${schema}`);
+      throw new Error(`unsupported key scheme ${scheme}`);
   }
 }
 

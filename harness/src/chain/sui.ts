@@ -27,7 +27,7 @@ import type { Logger } from "../observability/logger.js";
 
 // We import only types at the top to avoid loading the SDK in dry-run/tests.
 // Runtime values are pulled in via dynamic import() inside connect().
-type SuiClientT = import("@mysten/sui/client").SuiClient;
+type SuiClientT = import("@mysten/sui/jsonRpc").SuiJsonRpcClient;
 type KeypairT = import("@mysten/sui/cryptography").Keypair;
 type TransactionT = import("@mysten/sui/transactions").Transaction;
 
@@ -83,10 +83,11 @@ export class SuiChain implements Chain {
   /** Lazily construct the SDK client + Transaction class. */
   private async connect(): Promise<void> {
     if (this.connected) return;
-    const { SuiClient, getFullnodeUrl } = await import("@mysten/sui/client");
+    const { SuiJsonRpcClient, getJsonRpcFullnodeUrl } = await import("@mysten/sui/jsonRpc");
     const { Transaction } = await import("@mysten/sui/transactions");
-    this.client = new SuiClient({
-      url: this.opts.rpcUrl ?? getFullnodeUrl("localnet"),
+    this.client = new SuiJsonRpcClient({
+      network: "localnet",
+      url: this.opts.rpcUrl ?? getJsonRpcFullnodeUrl("localnet"),
     });
     this.Transaction = Transaction as unknown as new () => TransactionT;
     this.connected = true;

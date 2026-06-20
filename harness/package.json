@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@mysten/sui": "^1.37.0",
+    "@mysten/sui": "^2.19.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {
