@@ -54,6 +54,8 @@ GIX turns GPU inference into a liquid, exchange-traded commodity. To do that in 
   [verification-attestation.md](verification-attestation.md) §9.3 and
   [walrus-integration.md](walrus-integration.md) §11.
 - **Cross-chain settlement / non-USDC quote assets.** USDC is the only quote asset in v1.
+  USDC remains *the* canonical quote/settlement/bond asset; what is **per-network** is only
+  *which coin instantiates it* — see §5.1.
 - **Native GIX token (deferred).** v1 ships **without** the GIX token. Provider bonds
   are denominated in **USDC** — the same asset as escrow/settlement — so `ProviderStake`
   holds a `Balance<USDC>`; governance is exercised through an **`AdminCap`/multisig**; and
@@ -106,7 +108,10 @@ flowchart TB
 
 - **DeepBook — the order matching engine.** A central limit order book where
   tokenized Compute Credits trade against USDC. Continuous matching yields a live
-  spot price per market. Detail: [deepbook-integration.md](deepbook-integration.md).
+  spot price per market. DeepBook also backs the **SUI→USD on-ramp** (an in-app
+  funding swap on an *existing* `SUI/USDC`-family pool, no DEEP required — see §5.1
+  and [deepbook §13](deepbook-integration.md)). Detail:
+  [deepbook-integration.md](deepbook-integration.md).
 - **Walrus — the storage & audit layer.** Content-addressed blobs for model
   artifacts (the canonical "exact model" hash), job inputs, job outputs, and
   attestation quotes. Detail: [walrus-integration.md](walrus-integration.md).
@@ -229,10 +234,10 @@ Each entity is an independent object so that unrelated jobs execute in parallel.
 | Object | Ownership | Purpose |
 | --- | --- | --- |
 | `Market` | Shared | Market params, DeepBook pool id, SCU, SLA, Credit type, fee tier. |
-| `ProviderStake` | Owned (provider) | Collateral + capacity accounting; gates minting and is the slashable bond. **v1: USDC** collateral (GIX post-MVP). |
+| `ProviderStake` | Owned (provider) | Collateral + capacity accounting; gates minting and is the slashable bond. **v1: USDC** collateral (GIX post-MVP), held as `Balance<Q>` — the per-network quote dollar (§5.1). |
 | `ModelRecord` | Shared | Walrus content id of a model + its set of approved TEE measurements. |
 | `Job` | Shared | The escrowed unit of work: state, market, consumer, provider, input/model/output hashes, deadlines. |
-| `Escrow` | Held by `Job` | Locked USDC `Balance` for the job; released or refunded by `settlement`. |
+| `Escrow` | Held by `Job` | Locked USDC `Balance` for the job; released or refunded by `settlement`. Typed `Balance<Q>` — the per-network quote dollar (§5.1). |
 | `AttestationRecord` | Child of `Job` | The verified quote summary (measurement, hashes, timing) retained for audit. |
 | `MeasurementAllowlist` / `CertRoots` | Shared (governance) | Pinned vendor root certs and approved enclave/runtime measurements. |
 
@@ -242,6 +247,33 @@ Each entity is an independent object so that unrelated jobs execute in parallel.
 > allowlists) are read-mostly; writes to them are rare governance/admin actions, so
 > they do not serialize the job path. Design rules are in
 > [sui-move-contracts.md](sui-move-contracts.md).
+
+### 5.1 The quote dollar is parameterized (one codebase, three networks)
+
+**USDC remains *the* canonical quote/settlement/bond asset** — this is unchanged. What
+is new is its **per-network instantiation**: the money objects above (`Escrow`'s
+`Balance`, `ProviderStake`'s bond, settlement payouts, fees) are typed against a
+**generic phantom quote coin `Q`**, *not* a hardcoded `USDC`. The same Move code serves
+all three networks; only the type argument supplied at deployment differs:
+
+| Network | Quote dollar `Q` | What it is |
+| --- | --- | --- |
+| **localnet** | `MOCK_USDC` (ours) | Dev stand-in, minted freely from a faucet. |
+| **testnet** | **`DBUSDC`** (DeepBook's testnet USD) | The **testnet stand-in for USDC**. Real Circle USDC has **no liquid DeepBook *testnet* pool**, so DBUSDC is the honest testnet dollar — and transactions against it are **real on-chain testnet txns**, not mocks. |
+| **mainnet** | real **USDC** (Circle) | The production quote asset. |
+
+The three are interchangeable at the type boundary because `gix::escrow`,
+`gix::staking`, `gix::settlement`, and the refund path are all written over
+`Coin<Q>` / `Balance<Q>`. This replaces the earlier framing in which `MOCK_USDC` was
+the testnet quote coin: on testnet the quote/bond/settlement dollar is now **DBUSDC**.
+Full design and rationale: [onramp-dbusdc-plan.md](../onramp-dbusdc-plan.md).
+
+> **On-ramp (consumer funding).** Because consumers hold **SUI** (the gas token) but
+> compute is priced in `Q`, GIX ships a small in-app **SUI→USD on-ramp**: a utility
+> swap (`SUI → DBUSDC` on testnet, `SUI → USDC` on mainnet) that runs on an **existing**
+> DeepBook pool and needs **no DEEP**. It is a funding convenience, **not** a DEX and
+> **not** the compute order book — distinct from each market's `Credit<Market>/Q` pool,
+> which remains DEEP-gated to create. See [deepbook §13](deepbook-integration.md).
 
 ---
 
@@ -365,4 +397,5 @@ the future zk backend are in [verification-attestation.md](verification-attestat
 | Security | [../security/threat-model.md](../security/threat-model.md) |
 | Ops | [../operations/deployment.md](../operations/deployment.md) |
 | Plan | [../roadmap.md](../roadmap.md) |
+| On-ramp & testnet dollar | [../onramp-dbusdc-plan.md](../onramp-dbusdc-plan.md) |
 | Terms | [../glossary.md](../glossary.md) |

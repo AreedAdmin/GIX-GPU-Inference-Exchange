@@ -140,6 +140,19 @@ for every market in v1.
   fee a stable, predictable fraction of settled value rather than a bet on token
   price.
 
+> **USDC is the asset; its coin is per-network.** USDC remains *the* canonical
+> quote/escrow/payout/bond/fee dollar — that does not change. The contracts only
+> **parameterize** which coin instantiates it (generic phantom `Q`): **`MOCK_USDC` on
+> localnet, `DBUSDC` (DeepBook's testnet USD) on testnet, real Circle USDC on mainnet**.
+> Every "USDC" amount, `Escrow`, bond, and fee in this document is denominated in that
+> network's `Q`. On testnet specifically the dollar is **DBUSDC** (real USDC has no liquid
+> DeepBook *testnet* pool), and transactions are real on-chain testnet txns. A consumer
+> who holds only SUI funds their wallet via the **SUI→USD on-ramp** (a no-DEEP swap on an
+> existing DeepBook pool — [overview §5.1](architecture/overview.md),
+> [deepbook §13](architecture/deepbook-integration.md)); the on-ramp is a funding step,
+> separate from the compute `Credit/USDC` market. See
+> [onramp-dbusdc-plan.md](onramp-dbusdc-plan.md).
+
 ### 2.1 Why a stablecoin quote (and not GIX)
 
 Pricing compute in a volatile native token is a well-known anti-pattern:

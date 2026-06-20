@@ -23,6 +23,11 @@ class)` — gets exactly one DeepBook pool:
 Pool(Market) = Credit<Market> / USDC
 ```
 
+USDC here is the **canonical quote asset**, instantiated per network as the generic quote
+coin `Q` — `MOCK_USDC` (localnet), **`DBUSDC`** (testnet), real USDC (mainnet); see
+[overview §5.1](overview.md) and §13. Below, "USDC" means whichever `Q` the target network
+uses.
+
 Providers post **asks** (sell `Credit<Market>` for USDC); consumers post **bids** or
 **market orders** (buy `Credit<Market>` with USDC). The clearing price of that pool is
 the market's live **spot price** of compute — the present price of one SCU of the
@@ -800,7 +805,49 @@ Matching-layer attack surface — full treatment in
 
 ---
 
+## 13. The SUI→USD on-ramp (consumer funding)
+
+Consumers hold **SUI** (the gas token) but compute is priced in the quote dollar `Q`
+(`MOCK_USDC` / `DBUSDC` / `USDC` per network — [overview §5.1](overview.md)). To fund a
+purchase without leaving the app, GIX ships a small **SUI→USD on-ramp**: an in-app
+**utility swap**, *not* a DEX, that converts a user's SUI into the quote dollar they then
+spend on inference.
+
+Crucially, this is the **one DeepBook integration GIX can demonstrate live today with no
+DEEP**, because it rides an **existing** pool rather than a GIX-created one:
+
+| Network | On-ramp swap | Pool (existing) |
+| --- | --- | --- |
+| **testnet** | `SUI → DBUSDC` | `SUI_DBUSDC` (DeepBook's live testnet pool) |
+| **mainnet** | `SUI → USDC` | `SUI_USDC` |
+
+Flow:
+
+1. User holds SUI; the widget ("Get USDC") swaps `SUI → DBUSDC` on the existing pool.
+2. The swap PTB pays fees with the **input coin** (`pay_with_deep: false`, §2.4) → **no
+   DEEP** needed.
+3. The user now holds the quote dollar and buys compute via the normal path (§5–§6).
+
+### 13.1 On-ramp vs the compute order book — keep them distinct
+
+The on-ramp and the per-market `Credit<Market>/Q` book are **different things** and must
+not be conflated:
+
+| | On-ramp swap | Compute order book |
+| --- | --- | --- |
+| Purpose | Fund a wallet (SUI → quote dollar) | Match compute supply/demand; price discovery |
+| Pool | An **existing** `SUI/USD`-family DeepBook pool | A **GIX-created** `Credit<Market>/Q` pool (§4) |
+| DEEP | **None** — uses an existing pool + input-coin fees | Pool **creation is DEEP-gated** (500 DEEP, §2.1, §12 Q5) |
+| Role in GIX | Funding convenience | The exchange itself |
+| Live now? | **Yes** (real testnet txns on `SUI_DBUSDC`) | Direct/Ask buy path works now; the permissionless `Credit/Q` order book is the DEEP-gated piece |
+
+So the on-ramp proves the DeepBook integration **live now, DEEP-free**, while the
+DEEP-requiring work (creating each market's `Credit<Market>/Q` pool) stays on the roadmap.
+Full design: [onramp-dbusdc-plan.md](../onramp-dbusdc-plan.md).
+
+---
+
 *Cross-references:* [overview](overview.md) · [contracts](sui-move-contracts.md) ·
 [lifecycle](../protocol/task-lifecycle.md) · [tokenomics](../tokenomics.md) ·
 [threat model](../security/threat-model.md) · [node](node-architecture.md) ·
-[sdk](sdk.md)
+[sdk](sdk.md) · [on-ramp plan](../onramp-dbusdc-plan.md)

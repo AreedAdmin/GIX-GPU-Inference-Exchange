@@ -12,8 +12,28 @@ exactly as defined here.
   governance runs through an `AdminCap`/multisig, and fees are taken in USDC. Most
   uses of "GIX" in the docs refer to the protocol/package; token mechanics
   (tokenomics §3, §8–9) describe the post-MVP end state.
-- **USDC** — Circle-native USD Coin on Sui. The **settlement and quote asset** for
-  all markets in v1. The unit of account.
+- **USDC** — Circle-native USD Coin on Sui. The **canonical settlement, quote, and bond
+  asset** for all markets in v1 — the unit of account. USDC is **the** quote asset; what
+  varies is only its **per-network instantiation**: the contracts parameterize the quote
+  coin as a generic phantom `Q` and instantiate it as **`MOCK_USDC` on localnet, `DBUSDC`
+  on testnet, real Circle USDC on mainnet** (see *DBUSDC*, *Quote coin (`Q`)*, and
+  [onramp-dbusdc-plan.md](onramp-dbusdc-plan.md)).
+- **DBUSDC** — DeepBook's **testnet USD** coin (`…::DBUSDC::DBUSDC`); GIX's **testnet
+  stand-in for USDC**. Used because real Circle USDC has **no liquid DeepBook *testnet*
+  pool** (those pools are mainnet-only), whereas DeepBook ships a live `SUI/DBUSDC` testnet
+  pool. On testnet, DBUSDC is the quote/settlement/bond dollar and the on-ramp output;
+  transactions against it are **real on-chain testnet txns**, not mocks. (localnet uses
+  `MOCK_USDC`; mainnet uses real USDC.)
+- **Quote coin (`Q`)** — The generic **phantom type parameter** the `gix` contracts use
+  for the dollar, instantiated per network (`MOCK_USDC` / `DBUSDC` / `USDC`). One codebase,
+  no hardcoded dollar: `Escrow`, `ProviderStake`, settlement, fees, and refunds are all
+  written over `Coin<Q>` / `Balance<Q>`.
+- **On-ramp** — An in-app **SUI→USD swap** that funds compute purchases: a small utility
+  widget (**not** a DEX) that swaps `SUI → DBUSDC` (testnet) / `SUI → USDC` (mainnet) on an
+  **existing** DeepBook pool, so it needs **no DEEP** and works today. It is a consumer
+  *funding convenience*, distinct from each market's DEEP-gated `Credit<Market>/Q` compute
+  pool. See [onramp-dbusdc-plan.md](onramp-dbusdc-plan.md) and
+  [deepbook §13](architecture/deepbook-integration.md).
 - **Compute Credit** — A fungible Sui coin scoped to a single market. One credit
   represents one **Standardized Compute Unit** of that market. Minted by providers
   against staked capacity, traded on DeepBook, burned on job completion. **v1/M2:
@@ -61,10 +81,12 @@ exactly as defined here.
 - **Job** — Shared object representing one escrowed unit of work and its lifecycle
   state. The atom of parallel settlement.
 - **Escrow** — The locked consumer USDC `Balance` held against a `Job` until
-  settlement or refund.
+  settlement or refund. Typed `Balance<Q>` — the per-network quote dollar (see *Quote
+  coin (`Q`)*).
 - **ProviderStake** — A provider's posted collateral and capacity accounting; the
-  slashable bond that gates credit minting. **v1: a `Balance<USDC>` bond** (GIX
-  collateral is a post-MVP upgrade).
+  slashable bond that gates credit minting. **v1: a `Balance<Q>` bond** denominated in
+  the quote dollar (GIX collateral is a post-MVP upgrade) — `Q` is the per-network dollar
+  (see *Quote coin (`Q`)*).
 - **ModelRecord** — Shared object binding a model's Walrus content id to its set of
   approved TEE measurements.
 - **AttestationRecord** — The verified summary of a node's attestation quote,

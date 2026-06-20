@@ -94,7 +94,15 @@ flowchart LR
 **Goal:** real price discovery and real audit storage wired into the job path.
 
 - Per-market `Credit/USDC` DeepBook pools; tick/lot/min sizing for micro-transactions
-  ([deepbook](architecture/deepbook-integration.md)).
+  ([deepbook](architecture/deepbook-integration.md)). The quote dollar is the per-network
+  `Q`: `MOCK_USDC` (localnet), **`DBUSDC`** (testnet), real USDC (mainnet) —
+  [overview §5.1](architecture/overview.md).
+- **SUI→USD on-ramp (live now, no DEEP).** An in-app utility swap (`SUI → DBUSDC` on
+  testnet via the existing `SUI_DBUSDC` pool; `SUI → USDC` on mainnet) that funds compute
+  purchases with **no DEEP** and demonstrates the DeepBook integration **live today** —
+  distinct from the DEEP-gated `Credit/Q` compute pool. It is a small funding widget, not a
+  DEX ([deepbook §13](architecture/deepbook-integration.md),
+  [on-ramp plan](onramp-dbusdc-plan.md)).
 - Relayer/indexer service: detect fills → create Jobs + escrow; **permissionless
   on-chain fallback** for liveness.
 - Walrus integration: model registry + content-addressed model hash; input/output and
@@ -258,6 +266,15 @@ phases and should be closed in Phase 0–2.
   a Sui throughput limit; the real constraint is **liquidity fragmentation + per-pool 500
   DEEP / cron overhead** → consolidate market dimensions.
   ([deepbook](architecture/deepbook-integration.md) §12 Q5)
+- **Per-network quote dollar** — USDC stays *the* quote asset; the contracts parameterize it
+  as a generic phantom `Q`, instantiated `MOCK_USDC` (localnet) / **`DBUSDC`** (testnet) /
+  real USDC (mainnet). DBUSDC is the testnet stand-in because real USDC has no liquid
+  DeepBook *testnet* pool. ([overview §5.1](architecture/overview.md),
+  [on-ramp plan](onramp-dbusdc-plan.md))
+- **SUI→USD on-ramp** — funds compute via a no-DEEP swap on an **existing** `SUI/USD`-family
+  DeepBook pool (`SUI_DBUSDC` testnet / `SUI_USDC` mainnet); demonstrates DeepBook live now,
+  distinct from the DEEP-gated `Credit/Q` compute pool.
+  ([deepbook §13](architecture/deepbook-integration.md))
 - **Walrus storage-cost mechanism** — **shared blobs** let the treasury sponsor retention;
   availability gate = the **`BlobCertified`/PoA** event.
   ([walrus](architecture/walrus-integration.md) §2, §9)
