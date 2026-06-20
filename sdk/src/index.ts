@@ -44,6 +44,21 @@ export {
   DEFAULT_BLOB_EPOCHS,
 } from "./walrus.js";
 export type { UploadInputResult, WalrusHelperOptions } from "./walrus.js";
+export {
+  OnRampClient,
+  TESTNET_DBUSDC_COIN_TYPE,
+  TESTNET_SUI_DBUSDC_POOL_ID,
+  SUI_DBUSDC_POOL_KEY,
+  SUI_COIN_TYPE,
+  SUI_DECIMALS,
+  DBUSDC_DECIMALS,
+} from "./onramp.js";
+export type {
+  SuiDbusdcQuote,
+  SwapSuiForDbusdcResult,
+  OnRampClientOptions,
+  OnRampSigner,
+} from "./onramp.js";
 export type {
   Deployment,
   MarketDeployment,
