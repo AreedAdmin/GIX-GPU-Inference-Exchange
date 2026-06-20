@@ -1,0 +1,390 @@
+/// Shared test harness: bootstraps the full `gix` protocol on a `test_scenario` ledger and
+/// drives the job lifecycle so each scenario test reads as a high-level flow.
+#[test_only]
+module gix::harness;
+
+use gix::attestation;
+use gix::config::{Self, Config, AdminCap};
+use gix::credit::Credit;
+use gix::governance;
+use gix::job::{Self, Job};
+use gix::market::{Self, Market};
+use gix::markets::M_H100_LLAMA8B;
+use gix::mock_usdc::{Self, MOCK_USDC};
+use gix::registry::{Self, ModelRecord, MeasurementAllowlist, ProviderCap, ProviderRecord};
+use gix::settlement::{Self, Treasury};
+use gix::staking::{Self, ProviderStake};
+use sui::clock::{Self, Clock};
+use sui::coin::{Self, Coin};
+use sui::test_scenario::{Self as ts, Scenario};
+
+// Canonical actors.
+public fun admin(): address { @0xAD }
+public fun provider(): address { @0xB0B }
+public fun consumer(): address { @0xCAFE }
+
+// M1 market parameters.
+public fun scu_tokens(): u64 { 1000 }
+public fun sla_p99_ms(): u64 { 5000 }
+public fun mock_measurement(): vector<u8> { b"MOCK-tdx-llama8b-v1" }
+public fun model_hash(): vector<u8> { b"model-hash-llama8b" }
+public fun input_hash(): vector<u8> { b"input-hash-1" }
+public fun output_hash(): vector<u8> { b"output-hash-1" }
+
+/// A throwaway 32-byte Ed25519 pubkey for the mock-path harness flows (which never verify a
+/// signature). The signed-attestation tests use real keys from `gix::signed_attestation_tests`.
+public fun dummy_pubkey(): vector<u8> {
+    x"0000000000000000000000000000000000000000000000000000000000000000"
+}
+
+/// Begin a scenario as admin and publish all singletons (Config+AdminCap, registry
+/// allowlist, treasury, mock USDC faucet, and a Clock).
+public fun begin(): Scenario {
+    let mut sc = ts::begin(admin());
+    {
+        let ctx = sc.ctx();
+        config::init_for_testing(ctx);
+        registry::init_for_testing(ctx);
+        settlement::init_for_testing(ctx);
+        mock_usdc::init_for_testing(ctx);
+        let clk = clock::create_for_testing(ctx);
+        clk.share_for_testing();
+    };
+    sc.next_tx(admin());
+    sc
+}
+
+/// Mint `amount` MOCK_USDC to the current sender and return the coin.
+public fun mint_usdc(sc: &mut Scenario, amount: u64): Coin<MOCK_USDC> {
+    mock_usdc::mint_for_testing(amount, sc.ctx())
+}
+
+/// Admin creates the M1 market, registers the model + mock measurement, and returns the
+/// model id. Leaves Config/AdminCap/allowlist shared.
+public fun bootstrap_market(sc: &mut Scenario): ID {
+    sc.next_tx(admin());
+    let cap = sc.take_from_sender<AdminCap>();
+    let cfg = sc.take_shared<Config>();
+    let mut allow = sc.take_shared<MeasurementAllowlist>();
+
+    let model_id = governance::register_model_with_measurement(
+        &cap,
+        &cfg,
+        &mut allow,
+        b"llama-3.1-8b-int8/vllm",
+        b"walrus-blob-model-1",
+        model_hash(),
+        mock_measurement(),
+        sc.ctx(),
+    );
+
+    market::create_market<M_H100_LLAMA8B>(
+        &cap,
+        &cfg,
+        b"H100-llama3.1-8b-int8",
+        b"H100-80GB",
+        model_id,
+        scu_tokens(),
+        sla_p99_ms(),
+        sc.ctx(),
+    );
+
+    ts::return_shared(cfg);
+    ts::return_shared(allow);
+    sc.return_to_sender(cap);
+    model_id
+}
+
+/// Provider registers (with a dummy attestation pubkey), stakes `bond_amt` USDC opening
+/// `capacity` SCU, and mints `qty` credits. Used by the mock-path flows.
+public fun provider_setup(
+    sc: &mut Scenario,
+    bond_amt: u64,
+    capacity: u64,
+    qty: u64,
+): Coin<Credit<M_H100_LLAMA8B>> {
+    provider_setup_with_key(sc, bond_amt, capacity, qty, dummy_pubkey())
+}
+
+/// Provider registers with an explicit 32-byte Ed25519 `attest_pubkey`, stakes `bond_amt`
+/// USDC opening `capacity` SCU, and mints `qty` credits. Returns the minted credits; the
+/// ProviderCap + stake are transferred to the provider as owned objects.
+public fun provider_setup_with_key(
+    sc: &mut Scenario,
+    bond_amt: u64,
+    capacity: u64,
+    qty: u64,
+    attest_pubkey: vector<u8>,
+): Coin<Credit<M_H100_LLAMA8B>> {
+    sc.next_tx(provider());
+    let cfg = sc.take_shared<Config>();
+    let cap = registry::register_provider(&cfg, b"http://node", b"H100-80GB", attest_pubkey, sc.ctx());
+
+    let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let bond = mint_usdc(sc, bond_amt);
+    let mut stake = staking::stake(&cap, &cfg, bond, capacity, sc.ctx());
+    let credits = staking::mint_credits<M_H100_LLAMA8B>(
+        &cap,
+        &mut stake,
+        &cfg,
+        &mut market,
+        qty,
+        sc.ctx(),
+    );
+
+    ts::return_shared(cfg);
+    ts::return_shared(market);
+    transfer::public_transfer(cap, provider());
+    transfer::public_transfer(stake, provider());
+    credits
+}
+
+/// Consumer creates a Job from the provided credits + escrow at the current clock time.
+/// Returns the new Job's id. Runs in a consumer tx. Uses the default `input_hash()`.
+public fun create_job(
+    sc: &mut Scenario,
+    credits: Coin<Credit<M_H100_LLAMA8B>>,
+    price: u64,
+): ID {
+    create_job_with_input(sc, credits, price, input_hash())
+}
+
+/// Like `create_job` but binds an explicit `input_hash` (e.g. a real `sha2_256(prompt)`
+/// digest the signed-attestation flow signs over).
+public fun create_job_with_input(
+    sc: &mut Scenario,
+    credits: Coin<Credit<M_H100_LLAMA8B>>,
+    price: u64,
+    in_hash: vector<u8>,
+): ID {
+    sc.next_tx(consumer());
+    let cfg = sc.take_shared<Config>();
+    let market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let clk = sc.take_shared<Clock>();
+    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+    let escrow = mint_usdc(sc, price);
+
+    let job_id = job::create_job<M_H100_LLAMA8B>(
+        &cfg,
+        &market,
+        &mut stake,
+        provider(),
+        credits,
+        escrow,
+        in_hash,
+        &clk,
+        sc.ctx(),
+    );
+
+    ts::return_shared(cfg);
+    ts::return_shared(market);
+    ts::return_shared(clk);
+    ts::return_to_address(provider(), stake);
+    job_id
+}
+
+/// Provider acks the job.
+public fun ack(sc: &mut Scenario) {
+    sc.next_tx(provider());
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let clk = sc.take_shared<Clock>();
+    job::ack<M_H100_LLAMA8B>(&mut job, &clk, sc.ctx());
+    ts::return_shared(job);
+    ts::return_shared(clk);
+}
+
+/// Provider submits a mock attestation with the given timing + output hash.
+public fun submit_attestation(
+    sc: &mut Scenario,
+    measurement: vector<u8>,
+    out_hash: vector<u8>,
+    output_token_count: u64,
+    t_start: u64,
+    t_end: u64,
+) {
+    sc.next_tx(provider());
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let cfg = sc.take_shared<Config>();
+    let market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let model = sc.take_shared<ModelRecord>();
+    let allow = sc.take_shared<MeasurementAllowlist>();
+    let clk = sc.take_shared<Clock>();
+
+    attestation::submit_mock_attestation<M_H100_LLAMA8B>(
+        &mut job,
+        &cfg,
+        &market,
+        &model,
+        &allow,
+        measurement,
+        out_hash,
+        output_token_count,
+        t_start,
+        t_end,
+        &clk,
+        sc.ctx(),
+    );
+
+    ts::return_shared(job);
+    ts::return_shared(cfg);
+    ts::return_shared(market);
+    ts::return_shared(model);
+    ts::return_shared(allow);
+    ts::return_shared(clk);
+}
+
+/// Provider submits a SIGNED attestation: verifies a real Ed25519 `signature` over the
+/// canonical message against the provider's registered `ProviderRecord` pubkey.
+public fun submit_signed(
+    sc: &mut Scenario,
+    measurement: vector<u8>,
+    in_hash: vector<u8>,
+    out_hash: vector<u8>,
+    output_token_count: u64,
+    t_start: u64,
+    t_end: u64,
+    signature: vector<u8>,
+) {
+    sc.next_tx(provider());
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let cfg = sc.take_shared<Config>();
+    let market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let model = sc.take_shared<ModelRecord>();
+    let allow = sc.take_shared<MeasurementAllowlist>();
+    let provider_rec = sc.take_shared<ProviderRecord>();
+    let clk = sc.take_shared<Clock>();
+
+    attestation::submit_signed_attestation<M_H100_LLAMA8B>(
+        &mut job,
+        &cfg,
+        &market,
+        &model,
+        &allow,
+        &provider_rec,
+        measurement,
+        in_hash,
+        out_hash,
+        output_token_count,
+        t_start,
+        t_end,
+        signature,
+        &clk,
+        sc.ctx(),
+    );
+
+    ts::return_shared(job);
+    ts::return_shared(cfg);
+    ts::return_shared(market);
+    ts::return_shared(model);
+    ts::return_shared(allow);
+    ts::return_shared(provider_rec);
+    ts::return_shared(clk);
+}
+
+/// Advance the shared Clock by `ms`.
+public fun advance_clock(sc: &mut Scenario, ms: u64) {
+    sc.next_tx(admin());
+    let mut clk = sc.take_shared<Clock>();
+    clk.increment_for_testing(ms);
+    ts::return_shared(clk);
+}
+
+/// Set the absolute clock time.
+public fun set_clock(sc: &mut Scenario, ms: u64) {
+    sc.next_tx(admin());
+    let mut clk = sc.take_shared<Clock>();
+    clk.set_for_testing(ms);
+    ts::return_shared(clk);
+}
+
+/// Settle a verified job. Returns nothing; assertions read from objects afterward.
+public fun settle(sc: &mut Scenario) {
+    sc.next_tx(consumer());
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let cfg = sc.take_shared<Config>();
+    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+    let mut treasury = sc.take_shared<Treasury>();
+
+    settlement::settle<M_H100_LLAMA8B>(
+        &mut job,
+        &mut market,
+        &cfg,
+        &mut stake,
+        &mut treasury,
+        sc.ctx(),
+    );
+
+    ts::return_shared(job);
+    ts::return_shared(market);
+    ts::return_shared(cfg);
+    ts::return_to_address(provider(), stake);
+    ts::return_shared(treasury);
+}
+
+/// Resolve an attested-but-failing job (invalid / SLA breach verdict).
+public fun resolve_attested(sc: &mut Scenario) {
+    sc.next_tx(consumer());
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let cfg = sc.take_shared<Config>();
+    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+    let mut treasury = sc.take_shared<Treasury>();
+
+    settlement::resolve_attested<M_H100_LLAMA8B>(
+        &mut job,
+        &mut market,
+        &cfg,
+        &mut stake,
+        &mut treasury,
+        sc.ctx(),
+    );
+
+    ts::return_shared(job);
+    ts::return_shared(market);
+    ts::return_shared(cfg);
+    ts::return_to_address(provider(), stake);
+    ts::return_shared(treasury);
+}
+
+/// Expire-and-resolve a job past a deadline.
+public fun expire_and_resolve(sc: &mut Scenario) {
+    sc.next_tx(consumer());
+    let mut job = sc.take_shared<Job<M_H100_LLAMA8B>>();
+    let mut market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let cfg = sc.take_shared<Config>();
+    let mut stake = ts::take_from_address<ProviderStake>(sc, provider());
+    let mut treasury = sc.take_shared<Treasury>();
+    let clk = sc.take_shared<Clock>();
+
+    settlement::expire_and_resolve<M_H100_LLAMA8B>(
+        &mut job,
+        &mut market,
+        &cfg,
+        &mut stake,
+        &mut treasury,
+        &clk,
+        sc.ctx(),
+    );
+
+    ts::return_shared(job);
+    ts::return_shared(market);
+    ts::return_shared(cfg);
+    ts::return_to_address(provider(), stake);
+    ts::return_shared(treasury);
+    ts::return_shared(clk);
+}
+
+// === Read helpers used by assertions ===
+
+/// Returns the USDC coin balance held by `who` (sums all their MOCK_USDC coins is overkill;
+/// tests transfer exactly one payout, so we take the most recent).
+public fun take_usdc(sc: &mut Scenario, who: address): Coin<MOCK_USDC> {
+    ts::take_from_address<Coin<MOCK_USDC>>(sc, who)
+}
+
+public fun has_usdc(who: address): bool {
+    ts::has_most_recent_for_address<Coin<MOCK_USDC>>(who)
+}
+
+public fun coin_value(c: &Coin<MOCK_USDC>): u64 { coin::value(c) }

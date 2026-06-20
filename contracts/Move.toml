@@ -1,0 +1,18 @@
+[package]
+name = "gix"
+edition = "2024"
+# GPU Inference Exchange — on-chain Move package.
+# See ../docs/architecture/sui-move-contracts.md for the canonical module map.
+
+[dependencies]
+# The Sui system framework is provided implicitly by the toolchain (sui >= 1.x).
+
+[addresses]
+gix = "0x0"
+
+# Note on publishing (sui 1.73+ package management):
+#   - localnet is ephemeral (--force-regenesis ⇒ new chain-id each boot), so we publish
+#     with `sui client test-publish . --build-env localnet` (manages an ephemeral
+#     Pub.localnet.toml) — see ops/scripts/deploy.sh. No persistent [environments] entry.
+#   - testnet/mainnet are built-in known environments and use `sui client publish`.
+

@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+#
+# GIX M1 localnet deploy script.
+#
+# Publishes the `gix` package to the active Sui network (intended: localnet), then:
+#   1. discovers the published objects (Config, AdminCap, MeasurementAllowlist, Treasury,
+#      mock_usdc Faucet) from the publish effects;
+#   2. registers the M1 model + its mock measurement and creates the H100/llama8b Market;
+#   3. funds the configured provider/consumer accounts with MOCK_USDC via the faucet;
+#   4. writes deployment.json (schema per docs/mvp-m1-integration-contract.md).
+#
+# Requirements: `sui` CLI (>= 1.45), `jq`. A funded active address with gas.
+#
+# Usage:
+#   scripts/deploy.sh                       # uses active env + active address as admin
+#   GIX_OUT=../ops/deployment.json scripts/deploy.sh
+#   GIX_PROVIDERS="0xabc,0xdef" GIX_CONSUMERS="0x123" scripts/deploy.sh
+#
+# If you cannot run a localnet validator here, the exact equivalent CLI commands are
+# documented in scripts/README.md; this script *is* those commands wired together.
+
+set -euo pipefail
+
+# --- config ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PKG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+OUT="${GIX_OUT:-$PKG_DIR/deployment.json}"
+GAS_BUDGET="${GIX_GAS_BUDGET:-200000000}"
+
+# M1 market parameters (must match harness / integration contract).
+MARKET_NAME="H100-llama3.1-8b-int8"
+GPU_CLASS="H100-80GB"
+SCU_TOKENS="${GIX_SCU_TOKENS:-1000}"
+SLA_P99_MS="${GIX_SLA_P99_MS:-5000}"
+MODEL_URI="llama-3.1-8b-int8/vllm"
+WALRUS_BLOB_ID="walrus-blob-model-1"
+MODEL_HASH="model-hash-llama8b"
+MOCK_MEASUREMENT="MOCK-tdx-llama8b-v1"   # MUST be MOCK-prefixed (K4 dev fence)
+
+# Per-account faucet amount (6 decimals -> 1_000_000 = 1 mUSDC).
+FUND_AMOUNT="${GIX_FUND_AMOUNT:-1000000000}"  # 1000 mUSDC each
+
+# --- helpers --------------------------------------------------------------------------
+say() { printf '\033[1;36m[gix-deploy]\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31m[gix-deploy ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
+
+command -v sui >/dev/null || die "sui CLI not found on PATH"
+command -v jq  >/dev/null || die "jq not found on PATH"
+
+NETWORK="$(sui client active-env 2>/dev/null || echo unknown)"
+ADMIN="$(sui client active-address)"
+say "network=$NETWORK  admin=$ADMIN"
+
+# Convert as_str helper to pull a created object id by its type substring from publish JSON.
+obj_by_type() { # <publish_json_file> <type_substring>
+  jq -r --arg t "$2" '
+    .objectChanges[]
+    | select(.type=="created" and (.objectType // "" | contains($t)))
+    | .objectId' "$1" | head -n1
+}
+
+# --- 1. publish -----------------------------------------------------------------------
+# An ephemeral localnet (--force-regenesis) is not a declared persistent environment, so
+# `sui client publish` refuses. The blessed path for local/ephemeral networks is
+# `test-publish` (manages an ephemeral Pub.localnet.toml). testnet/mainnet use `publish`.
+say "publishing package from $PKG_DIR (network=$NETWORK) ..."
+PUBLISH_JSON="$(mktemp)"
+if [ "$NETWORK" = "localnet" ]; then
+  sui client test-publish "$PKG_DIR" --build-env localnet \
+      --gas-budget "$GAS_BUDGET" --json > "$PUBLISH_JSON" \
+      || die "test-publish failed (try: sui client test-publish $PKG_DIR --build-env localnet)"
+else
+  sui client publish "$PKG_DIR" \
+      --gas-budget "$GAS_BUDGET" --json > "$PUBLISH_JSON" || die "publish failed (see output above)"
+fi
+
+PACKAGE_ID="$(jq -r '.objectChanges[] | select(.type=="published") | .packageId' "$PUBLISH_JSON")"
+[ -n "$PACKAGE_ID" ] && [ "$PACKAGE_ID" != "null" ] || die "could not parse packageId"
+say "packageId=$PACKAGE_ID"
+
+CONFIG_ID="$(obj_by_type "$PUBLISH_JSON" "::config::Config")"
+ADMIN_CAP_ID="$(obj_by_type "$PUBLISH_JSON" "::config::AdminCap")"
+ALLOWLIST_ID="$(obj_by_type "$PUBLISH_JSON" "::registry::MeasurementAllowlist")"
+TREASURY_ID="$(obj_by_type "$PUBLISH_JSON" "::settlement::Treasury")"
+FAUCET_ID="$(obj_by_type "$PUBLISH_JSON" "::mock_usdc::Faucet")"
+USDC_TYPE="${PACKAGE_ID}::mock_usdc::MOCK_USDC"
+CREDIT_TYPE_PARAM="${PACKAGE_ID}::markets::M_H100_LLAMA8B"
+CLOCK_ID="0x6"
+
+for v in CONFIG_ID ADMIN_CAP_ID ALLOWLIST_ID TREASURY_ID FAUCET_ID; do
+  [ -n "${!v}" ] && [ "${!v}" != "null" ] || die "could not discover $v from publish effects"
+done
+say "config=$CONFIG_ID adminCap=$ADMIN_CAP_ID allowlist=$ALLOWLIST_ID treasury=$TREASURY_ID faucet=$FAUCET_ID"
+
+# --- 2. register model + measurement, create market -----------------------------------
+say "registering model + mock measurement ..."
+REG_JSON="$(mktemp)"
+sui client call --package "$PACKAGE_ID" --module governance \
+    --function register_model_with_measurement \
+    --args "$ADMIN_CAP_ID" "$CONFIG_ID" "$ALLOWLIST_ID" \
+           "$MODEL_URI" "$WALRUS_BLOB_ID" "$MODEL_HASH" "$MOCK_MEASUREMENT" \
+    --gas-budget "$GAS_BUDGET" --json > "$REG_JSON" || die "register_model_with_measurement failed"
+
+MODEL_ID="$(obj_by_type "$REG_JSON" "::registry::ModelRecord")"
+[ -n "$MODEL_ID" ] && [ "$MODEL_ID" != "null" ] || die "could not parse ModelRecord id"
+say "modelId=$MODEL_ID"
+
+say "creating market $MARKET_NAME ..."
+MKT_JSON="$(mktemp)"
+sui client call --package "$PACKAGE_ID" --module market \
+    --function create_market \
+    --type-args "$CREDIT_TYPE_PARAM" \
+    --args "$ADMIN_CAP_ID" "$CONFIG_ID" \
+           "$MARKET_NAME" "$GPU_CLASS" "$MODEL_ID" "$SCU_TOKENS" "$SLA_P99_MS" \
+    --gas-budget "$GAS_BUDGET" --json > "$MKT_JSON" || die "create_market failed"
+
+MARKET_ID="$(obj_by_type "$MKT_JSON" "::market::Market")"
+[ -n "$MARKET_ID" ] && [ "$MARKET_ID" != "null" ] || die "could not parse Market id"
+say "marketId=$MARKET_ID"
+
+# --- 3. fund accounts -----------------------------------------------------------------
+PROVIDERS="${GIX_PROVIDERS:-$ADMIN}"
+CONSUMERS="${GIX_CONSUMERS:-$ADMIN}"
+fund() { # <addr>
+  say "  faucet $FUND_AMOUNT MOCK_USDC -> $1"
+  sui client call --package "$PACKAGE_ID" --module mock_usdc --function mint \
+      --args "$FAUCET_ID" "$FUND_AMOUNT" "$1" \
+      --gas-budget "$GAS_BUDGET" >/dev/null || die "faucet mint to $1 failed"
+}
+say "funding accounts with MOCK_USDC ..."
+IFS=',' read -ra P_ARR <<< "$PROVIDERS"
+IFS=',' read -ra C_ARR <<< "$CONSUMERS"
+for a in "${P_ARR[@]}"; do [ -n "$a" ] && fund "$a"; done
+for a in "${C_ARR[@]}"; do [ -n "$a" ] && fund "$a"; done
+
+# --- 4. emit deployment.json ----------------------------------------------------------
+say "writing $OUT ..."
+providers_json="$(printf '%s\n' "${P_ARR[@]}" | jq -R . | jq -s 'map(select(length>0))')"
+consumers_json="$(printf '%s\n' "${C_ARR[@]}" | jq -R . | jq -s 'map(select(length>0))')"
+
+jq -n \
+  --arg network "$NETWORK" \
+  --arg packageId "$PACKAGE_ID" \
+  --arg configId "$CONFIG_ID" \
+  --arg adminCapId "$ADMIN_CAP_ID" \
+  --arg allowlistId "$ALLOWLIST_ID" \
+  --arg treasuryId "$TREASURY_ID" \
+  --arg faucetId "$FAUCET_ID" \
+  --arg usdcType "$USDC_TYPE" \
+  --arg clockId "$CLOCK_ID" \
+  --arg mockMeasurement "$MOCK_MEASUREMENT" \
+  --arg admin "$ADMIN" \
+  --arg marketId "$MARKET_ID" \
+  --arg marketName "$MARKET_NAME" \
+  --arg creditType "$CREDIT_TYPE_PARAM" \
+  --argjson scuTokens "$SCU_TOKENS" \
+  --argjson slaP99Ms "$SLA_P99_MS" \
+  --arg modelId "$MODEL_ID" \
+  --argjson providers "$providers_json" \
+  --argjson consumers "$consumers_json" \
+  '{
+     network: $network,
+     packageId: $packageId,
+     configId: $configId,
+     adminCapId: $adminCapId,
+     allowlistId: $allowlistId,
+     treasuryId: $treasuryId,
+     faucetId: $faucetId,
+     usdcType: $usdcType,
+     clockId: $clockId,
+     mockMeasurement: $mockMeasurement,
+     markets: [
+       { id: $marketId, name: $marketName, creditType: $creditType,
+         creditCoinType: ($packageId + "::credit::Credit<" + $creditType + ">"),
+         modelId: $modelId, scuTokens: $scuTokens, slaP99Ms: $slaP99Ms }
+     ],
+     accounts: { admin: $admin, providers: $providers, consumers: $consumers }
+   }' > "$OUT"
+
+say "done. deployment.json:"
+cat "$OUT" >&2
+
+rm -f "$PUBLISH_JSON" "$REG_JSON" "$MKT_JSON"
