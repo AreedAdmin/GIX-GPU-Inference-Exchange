@@ -1,6 +1,6 @@
 # Slide 03 — The solution
 
-**On screen:** "A neutral, verifiable exchange for compute" + three cards: 01 Match (DeepBook), 02 Verify (TEE), 03 Settle (Sui + Walrus).
+**On screen:** "A neutral, verifiable exchange for compute" + a value-flow diagram (3 GPU providers → *provides spare compute* → **GIX** → *provides compute* → User) + three cards: 01 Match (DeepBook), 02 Verify (TEE), 03 Settle (Sui + Walrus).
 
 **Duration:** ~70s
 

@@ -174,13 +174,63 @@
       <div class="kicker">The solution</div>
       <h2>A neutral, verifiable exchange for compute.</h2>
       <div class="rule"></div>
-      <p class="lead">Three Sui-native substrates, one loop: <b>match</b> supply &amp; demand, <b>verify</b> execution in hardware, <b>settle</b> autonomously.</p>
-      <div class="cols c3" style="margin-top:18px">
-        <div class="card"><div class="n">01 · MATCH</div><div class="t" style="margin-top:6px">DeepBook v3 CLOB</div><div class="s">Tokenized compute credits trade against USDC on a real order book → a live spot price, no auction latency.</div></div>
-        <div class="card"><div class="n">02 · VERIFY</div><div class="t" style="margin-top:6px">TEE attestation</div><div class="s">A hardware-signed quote, checked <b>on-chain</b>, proves the right model ran on your exact input — paid only for proven work.</div></div>
-        <div class="card"><div class="n">03 · SETTLE</div><div class="t" style="margin-top:6px">Sui + Walrus</div><div class="s">USDC escrow releases only on a verified proof; a tamper-evident audit trail lives on Walrus.</div></div>
+      <!-- value-flow diagram: 3 GPU providers → GIX → User -->
+      <svg viewBox="0 0 980 200" width="100%" style="max-width:900px;display:block;margin:10px auto 0"
+           font-family="Inter, Arial, sans-serif" role="img"
+           aria-label="Three GPU providers provide spare compute to GIX, which provides compute to the user.">
+        <defs>
+          <marker id="pah" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0 0L10 5L0 10z" fill="#2d5be3"/>
+          </marker>
+        </defs>
+
+        <!-- 3 GPU provider boxes -->
+        <g>
+          <rect x="24" y="23" width="150" height="42" rx="9" fill="#f6f8fa" stroke="#d2d8e0"/>
+          <text x="99" y="42" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0e1116">GPU Provider</text>
+          <text x="99" y="57" text-anchor="middle" font-size="9.5" fill="#79828f" font-family="ui-monospace,Menlo,monospace">spare capacity</text>
+
+          <rect x="24" y="79" width="150" height="42" rx="9" fill="#f6f8fa" stroke="#d2d8e0"/>
+          <text x="99" y="98" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0e1116">GPU Provider</text>
+          <text x="99" y="113" text-anchor="middle" font-size="9.5" fill="#79828f" font-family="ui-monospace,Menlo,monospace">spare capacity</text>
+
+          <rect x="24" y="135" width="150" height="42" rx="9" fill="#f6f8fa" stroke="#d2d8e0"/>
+          <text x="99" y="154" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0e1116">GPU Provider</text>
+          <text x="99" y="169" text-anchor="middle" font-size="9.5" fill="#79828f" font-family="ui-monospace,Menlo,monospace">spare capacity</text>
+        </g>
+
+        <!-- providers → GIX (converging) -->
+        <g fill="none" stroke="#2d5be3" stroke-width="1.7">
+          <path d="M176 44 L424 80" marker-end="url(#pah)"/>
+          <path d="M176 100 L424 100" marker-end="url(#pah)"/>
+          <path d="M176 156 L424 120" marker-end="url(#pah)"/>
+        </g>
+
+        <!-- GIX hub -->
+        <rect x="430" y="35" width="130" height="130" rx="14" fill="#fff" stroke="#2d5be3" stroke-width="2.5"/>
+        <text x="495" y="96" text-anchor="middle" font-size="30" font-weight="800" letter-spacing="1" fill="#2d5be3">GIX</text>
+        <text x="495" y="120" text-anchor="middle" font-size="10.5" letter-spacing="1.5" fill="#1a2a66" font-family="ui-monospace,Menlo,monospace">the exchange</text>
+
+        <!-- GIX → User -->
+        <line x1="562" y1="100" x2="732" y2="100" stroke="#2d5be3" stroke-width="1.7" marker-end="url(#pah)"/>
+
+        <!-- User -->
+        <rect x="738" y="59" width="200" height="82" rx="12" fill="#eaf0ff" stroke="#2d5be3"/>
+        <text x="838" y="96" text-anchor="middle" font-size="16" font-weight="800" fill="#1a2a66">User</text>
+        <text x="838" y="116" text-anchor="middle" font-size="10" fill="#3d5aae" font-family="ui-monospace,Menlo,monospace">AI app · agent</text>
+
+        <!-- edge labels -->
+        <text x="300" y="190" text-anchor="middle" font-size="12" font-weight="600" fill="#2d5be3" font-family="ui-monospace,Menlo,monospace">Provides spare compute</text>
+        <text x="647" y="190" text-anchor="middle" font-size="12" font-weight="600" fill="#2d5be3" font-family="ui-monospace,Menlo,monospace">Provides compute</text>
+      </svg>
+
+      <p class="small muted" style="text-align:center;margin-top:8px">Match supply &amp; demand on DeepBook, verify in hardware, settle on Sui — off-chain holds <b>no authority</b>.</p>
+
+      <div class="cols c3" style="margin-top:14px">
+        <div class="card"><div class="n">01 · MATCH</div><div class="t" style="margin-top:6px">DeepBook v3 CLOB</div><div class="s">Tokenized compute credits trade against USDC on a real order book → a live spot price.</div></div>
+        <div class="card"><div class="n">02 · VERIFY</div><div class="t" style="margin-top:6px">TEE attestation</div><div class="s">A hardware-signed quote, checked <b>on-chain</b> — paid only for proven work.</div></div>
+        <div class="card"><div class="n">03 · SETTLE</div><div class="t" style="margin-top:6px">Sui + Walrus</div><div class="s">USDC escrow releases only on a verified proof; tamper-evident audit on Walrus.</div></div>
       </div>
-      <p class="small muted" style="margin-top:18px">Off-chain software optimizes UX and liveness, but holds <b>no authority</b> — settlement is decided solely on-chain.</p>
       <div class="foot"><span>MATCH · VERIFY · SETTLE</span><span>NEUTRAL MARKET INFRASTRUCTURE</span></div>
     </section>
 
