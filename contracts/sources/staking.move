@@ -1,8 +1,11 @@
-/// Provider collateral staking + capacity accounting (v1 bond is USDC).
+/// Provider collateral staking + capacity accounting (v1 bond is the quote dollar `Q`).
 ///
-/// `ProviderStake` is an **owned** object (one per provider) holding the slashable
-/// `Balance<MOCK_USDC>` bond and the capacity counters that gate credit minting and
-/// concurrent job exposure. Owned ⇒ a provider's stake-touching txns only serialize
+/// `ProviderStake<phantom Q>` is an **owned** object (one per provider) holding the slashable
+/// `Balance<Q>` bond and the capacity counters that gate credit minting and concurrent job
+/// exposure. `Q` is the per-network quote/bond/settlement dollar — `MOCK_USDC` on localnet,
+/// `DBUSDC` on testnet, real `USDC` on mainnet (see docs/onramp-dbusdc-plan.md). The dollar is
+/// chosen at instantiation, so one codebase serves every network with no hardcoded coin.
+/// Owned ⇒ a provider's stake-touching txns only serialize
 /// against *themselves*, never the whole system; L3 says batch them into one PTB at MVP.
 ///
 /// Capacity model (token-SCU, E1):
@@ -24,8 +27,6 @@ use sui::balance::{Self, Balance};
 use sui::clock::Clock;
 use sui::coin::{Self, Coin};
 
-use gix::mock_usdc::MOCK_USDC;
-
 // === Error codes (3xx: staking / credit) ===
 const EInsufficientStake: u64 = 300;
 const EInsufficientCapacity: u64 = 301;
@@ -35,11 +36,11 @@ const EWrongProvider: u64 = 304;
 const EInsufficientBond: u64 = 305;
 const EZeroQty: u64 = 405;
 
-public struct ProviderStake has key, store {
+public struct ProviderStake<phantom Q> has key, store {
     id: UID,
     version: u64,
     provider: address,
-    bond: Balance<MOCK_USDC>,
+    bond: Balance<Q>,
     capacity_scu: u64,
     minted_scu: u64,
     reserved_scu: u64,
@@ -51,21 +52,21 @@ const VERSION: u64 = 1;
 
 // === Stake / unstake ===
 
-/// Post a USDC bond and open `capacity_scu` of capacity. Returns the owned stake to the
-/// provider. Asserts the bond meets `cfg.min_stake`.
-public fun stake(
+/// Post a `Q`-denominated bond and open `capacity_scu` of capacity. Returns the owned stake to
+/// the provider. Asserts the bond meets `cfg.min_stake`. `Q` is the network's quote dollar.
+public fun stake<Q>(
     cap: &ProviderCap,
     cfg: &Config,
-    bond: Coin<MOCK_USDC>,
+    bond: Coin<Q>,
     capacity_scu: u64,
     ctx: &mut TxContext,
-): ProviderStake {
+): ProviderStake<Q> {
     cfg.assert_version();
     cfg.assert_not_paused();
     let amount = coin::value(&bond);
     assert!(amount >= cfg.min_stake(), EInsufficientStake);
     let provider = cap.cap_provider();
-    let stake = ProviderStake {
+    let stake = ProviderStake<Q> {
         id: object::new(ctx),
         version: VERSION,
         provider,
@@ -81,10 +82,10 @@ public fun stake(
 }
 
 /// Add more bond to an existing stake and (optionally) extend capacity.
-public fun add_bond(
+public fun add_bond<Q>(
     cap: &ProviderCap,
-    stake: &mut ProviderStake,
-    bond: Coin<MOCK_USDC>,
+    stake: &mut ProviderStake<Q>,
+    bond: Coin<Q>,
     extra_capacity_scu: u64,
 ) {
     assert!(cap.cap_provider() == stake.provider, EWrongProvider);
@@ -94,13 +95,13 @@ public fun add_bond(
 
 /// Withdraw `amount` of free (unreserved, unminted-against) bond. Cannot pull bond that
 /// backs outstanding credits or in-flight jobs, and respects the unbonding timelock.
-public fun unstake(
+public fun unstake<Q>(
     cap: &ProviderCap,
-    stake: &mut ProviderStake,
+    stake: &mut ProviderStake<Q>,
     amount: u64,
     clk: &Clock,
     ctx: &mut TxContext,
-): Coin<MOCK_USDC> {
+): Coin<Q> {
     assert!(cap.cap_provider() == stake.provider, EWrongProvider);
     assert!(clk.timestamp_ms() >= stake.locked_until, EUnbonding);
     // Free capacity must cover what we are de-committing: a simplifying MVP rule keeps
@@ -116,9 +117,9 @@ public fun unstake(
 
 /// Mint `qty` credits for `market` against this stake's free capacity. The credits are a
 /// `Coin<Credit<M>>` the provider can sell on DeepBook (M1: feed straight into a Job).
-public fun mint_credits<M>(
+public fun mint_credits<M, Q>(
     cap: &ProviderCap,
-    stake: &mut ProviderStake,
+    stake: &mut ProviderStake<Q>,
     cfg: &Config,
     market: &mut Market<M>,
     qty: u64,
@@ -151,9 +152,9 @@ public fun mint_credits<M>(
 ///
 /// NOTE: `market` is `&mut` (not `&`) because the credit `Supply<Credit<M>>` lives inside the
 /// `Market` — minting co-locates with the market exactly as `mint_credits` does.
-public fun post_ask<M>(
+public fun post_ask<M, Q>(
     cap: &ProviderCap,
-    stake: &mut ProviderStake,
+    stake: &mut ProviderStake<Q>,
     cfg: &Config,
     market: &mut Market<M>,
     qty_scu: u64,
@@ -183,13 +184,13 @@ public fun post_ask<M>(
 
 /// Reserve `qty` SCU for an in-flight job (called at Job creation). Bounds concurrent
 /// exposure to the bond.
-public(package) fun reserve(stake: &mut ProviderStake, qty: u64) {
+public(package) fun reserve<Q>(stake: &mut ProviderStake<Q>, qty: u64) {
     assert!(stake.reserved_scu + qty <= stake.capacity_scu, EInsufficientCapacity);
     stake.reserved_scu = stake.reserved_scu + qty;
 }
 
 /// Release a reservation at any terminal state.
-public(package) fun release(stake: &mut ProviderStake, qty: u64) {
+public(package) fun release<Q>(stake: &mut ProviderStake<Q>, qty: u64) {
     if (stake.reserved_scu >= qty) {
         stake.reserved_scu = stake.reserved_scu - qty;
     } else {
@@ -198,7 +199,7 @@ public(package) fun release(stake: &mut ProviderStake, qty: u64) {
 }
 
 /// Consume minted capacity when credits are burned at `Settled` (capacity is spent).
-public(package) fun consume_minted(stake: &mut ProviderStake, qty: u64) {
+public(package) fun consume_minted<Q>(stake: &mut ProviderStake<Q>, qty: u64) {
     if (stake.minted_scu >= qty) {
         stake.minted_scu = stake.minted_scu - qty;
     } else {
@@ -208,7 +209,7 @@ public(package) fun consume_minted(stake: &mut ProviderStake, qty: u64) {
 
 /// Debit `amount` from the bond as a slash; records the lifetime total. Returns the
 /// slashed `Balance` for distribution by `settlement`. Capped at the available bond.
-public(package) fun slash(stake: &mut ProviderStake, amount: u64): Balance<MOCK_USDC> {
+public(package) fun slash<Q>(stake: &mut ProviderStake<Q>, amount: u64): Balance<Q> {
     let avail = balance::value(&stake.bond);
     let take = if (amount > avail) avail else amount;
     stake.slashed_total = stake.slashed_total + take;
@@ -216,31 +217,31 @@ public(package) fun slash(stake: &mut ProviderStake, amount: u64): Balance<MOCK_
 }
 
 /// De-rate capacity after a fault (B5: linear −10% per fault, floored at 0).
-public(package) fun derate(stake: &mut ProviderStake) {
+public(package) fun derate<Q>(stake: &mut ProviderStake<Q>) {
     let cut = stake.capacity_scu / 10;
     stake.capacity_scu = if (stake.capacity_scu > cut) stake.capacity_scu - cut else 0;
 }
 
-public(package) fun set_unbonding(stake: &mut ProviderStake, until_ms: u64) {
+public(package) fun set_unbonding<Q>(stake: &mut ProviderStake<Q>, until_ms: u64) {
     stake.locked_until = until_ms;
 }
 
 // === Reads ===
 
-public fun provider(stake: &ProviderStake): address { stake.provider }
-public fun bond_value(stake: &ProviderStake): u64 { balance::value(&stake.bond) }
-public fun capacity_scu(stake: &ProviderStake): u64 { stake.capacity_scu }
-public fun minted_scu(stake: &ProviderStake): u64 { stake.minted_scu }
-public fun reserved_scu(stake: &ProviderStake): u64 { stake.reserved_scu }
-public fun slashed_total(stake: &ProviderStake): u64 { stake.slashed_total }
-public fun free_capacity(stake: &ProviderStake): u64 {
+public fun provider<Q>(stake: &ProviderStake<Q>): address { stake.provider }
+public fun bond_value<Q>(stake: &ProviderStake<Q>): u64 { balance::value(&stake.bond) }
+public fun capacity_scu<Q>(stake: &ProviderStake<Q>): u64 { stake.capacity_scu }
+public fun minted_scu<Q>(stake: &ProviderStake<Q>): u64 { stake.minted_scu }
+public fun reserved_scu<Q>(stake: &ProviderStake<Q>): u64 { stake.reserved_scu }
+public fun slashed_total<Q>(stake: &ProviderStake<Q>): u64 { stake.slashed_total }
+public fun free_capacity<Q>(stake: &ProviderStake<Q>): u64 {
     if (stake.capacity_scu > stake.reserved_scu) stake.capacity_scu - stake.reserved_scu else 0
 }
 
 // === Test helpers ===
 
 #[test_only]
-public fun destroy_for_testing(stake: ProviderStake) {
+public fun destroy_for_testing<Q>(stake: ProviderStake<Q>) {
     let ProviderStake {
         id,
         version: _,
