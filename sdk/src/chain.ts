@@ -154,11 +154,15 @@ export class GixChain {
         `create_job: provider ${provider} holds no ProviderStake (provider must stake first)`,
       );
     }
-    const creditType = `${this.pkg}::credit::Credit<${market.creditType}>`;
-    const credit = await this.firstOwnedOfType(provider, creditType);
+    // Credits are minted as `Coin<Credit<M>>` — the on-chain object type is the
+    // 0x2::coin::Coin wrapper, NOT the bare Credit<M> witness. (deployment.json's
+    // `creditCoinType` records the inner Credit<M> type; we wrap it here.)
+    const innerCredit = market.creditCoinType ?? `${this.pkg}::credit::Credit<${market.creditType}>`;
+    const creditCoinType = `0x2::coin::Coin<${innerCredit}>`;
+    const credit = await this.firstOwnedOfType(provider, creditCoinType);
     if (!credit) {
       throw new Error(
-        `create_job: provider ${provider} holds no ${creditType} (provider must mint credits)`,
+        `create_job: provider ${provider} holds no ${creditCoinType} (provider must mint credits)`,
       );
     }
     return { stakeId: stake, creditCoinId: credit };
@@ -268,6 +272,9 @@ export class GixChain {
 
   /** Sign + execute via the WalletSigner seam (keypair OR injected wallet). */
   private async execute(tx: TransactionT, signer: WalletSigner) {
+    // The sender must be set before building (a raw Keypair signer carries no
+    // sender; dapp-kit sets it itself, but setting it here is idempotent).
+    tx.setSenderIfNotSet(signer.toSuiAddress());
     const bytes = await tx.build({ client: this.client });
     const { signature } = await signer.signTransaction(bytes);
     const res = await this.client.executeTransactionBlock({

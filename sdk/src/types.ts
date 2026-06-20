@@ -15,6 +15,9 @@ export interface MarketDeployment {
   name: string;
   /** Fully-qualified `Credit<M>` witness type, the `--type-args` for every PTB. */
   creditType: string;
+  /** Fully-qualified inner `credit::Credit<M>` coin type (wrapped as `Coin<...>`
+   * on-chain). From deployment.json; used to locate the provider's credit coin. */
+  creditCoinType?: string;
   /** Per-market `registry::ModelRecord` id. */
   modelId?: string;
   /** Tokens per 1 SCU (token-metered). */
