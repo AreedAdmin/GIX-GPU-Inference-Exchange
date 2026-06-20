@@ -1,0 +1,30 @@
+{
+  "name": "@gix/node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GIX provider node (D0) — serves real inference on an NVIDIA GB10 via Ollama, produces signed Ed25519 attestations, and submits them on-chain to the gix package.",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "gix-node": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "ollama-check": "tsx src/cli/ollama-check.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.37.0",
+    "@noble/ed25519": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
