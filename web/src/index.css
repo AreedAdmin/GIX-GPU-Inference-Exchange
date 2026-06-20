@@ -1,0 +1,174 @@
+/* Fonts — bundled, no network at runtime (contract §1). */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* surfaces */
+  --bg-base: #05070a;
+  --bg-elev: #0a0e15;
+  --surface-glass: rgba(18, 24, 34, 0.55);
+  --surface-glass-2: rgba(20, 27, 38, 0.72);
+  --border-glass: rgba(150, 170, 200, 0.1);
+  --border-glass-2: rgba(150, 170, 200, 0.18);
+  /* text */
+  --text-primary: #e6edf5;
+  --text-secondary: #8a99ad;
+  --text-muted: #566678;
+  /* accents */
+  --accent: #34d2c3;
+  --accent-blue: #5b8def;
+  --amber: #f5a623;
+  /* market semantics */
+  --buy: #0ecb81;
+  --sell: #f6465d;
+  --buy-bg: rgba(14, 203, 129, 0.12);
+  --sell-bg: rgba(246, 70, 93, 0.12);
+  /* texture */
+  --grid-line: rgba(120, 140, 170, 0.06);
+
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: theme("fontFamily.sans");
+    font-size: 13px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+  }
+  ::selection {
+    background: rgba(52, 210, 195, 0.28);
+    color: #fff;
+  }
+  /* thin terminal scrollbars */
+  ::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(120, 140, 170, 0.18);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 140, 170, 0.3);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(120, 140, 170, 0.2) transparent;
+  }
+}
+
+@layer components {
+  /* The §1 glass recipe. */
+  .glass {
+    background: var(--surface-glass);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--border-glass);
+    border-radius: 12px;
+    box-shadow:
+      0 10px 30px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  .glass-2 {
+    background: var(--surface-glass-2);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--border-glass-2);
+    border-radius: 12px;
+    box-shadow:
+      0 16px 44px rgba(0, 0, 0, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  /* uppercase, letter-spaced micro labels */
+  .label-micro {
+    font-size: 10px;
+    line-height: 14px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .num {
+    font-family: theme("fontFamily.mono");
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+}
+
+@layer components {
+  /* % slider used in the order ticket */
+  .gix-range {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--accent, #34d2c3) 0%,
+      var(--accent, #34d2c3) var(--sel, 0%),
+      rgba(150, 170, 200, 0.16) var(--sel, 0%),
+      rgba(150, 170, 200, 0.16) 100%
+    );
+    outline: none;
+    cursor: pointer;
+  }
+  .gix-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: #e6edf5;
+    border: 2px solid var(--accent, #34d2c3);
+    box-shadow: 0 0 8px rgba(52, 210, 195, 0.45);
+    cursor: pointer;
+  }
+  .gix-range::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: #e6edf5;
+    border: 2px solid var(--accent, #34d2c3);
+    box-shadow: 0 0 8px rgba(52, 210, 195, 0.45);
+    cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .tabnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
