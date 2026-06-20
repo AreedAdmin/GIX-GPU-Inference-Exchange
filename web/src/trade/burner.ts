@@ -13,6 +13,34 @@ type Ed25519KeypairT = import("@mysten/sui/keypairs/ed25519").Ed25519Keypair;
 
 const STORAGE_KEY = "gix.burner.secretKey.v1";
 
+/** An optionally pre-provisioned signer key (bech32 `suiprivkey1…`) set via
+ *  `VITE_WALLET_SK`. When present, the app signs as THIS account — so the wallet UI shows
+ *  your real address + real balances instead of a throwaway burner.
+ *  ⚠️ TESTNET / DEMO ONLY: the key is bundled into the browser. Never use a mainnet key.
+ *  Set it in `web/.env` (gitignored), never in committed code. Export yours with
+ *  `sui keytool export --key-identity <addr>`. */
+function configuredSecret(): string | null {
+  const v = (import.meta.env as Record<string, string | undefined>)?.VITE_WALLET_SK;
+  return v && v.trim().length > 0 ? v.trim() : null;
+}
+
+/** True when a real account key is configured via `VITE_WALLET_SK`. */
+export function hasConfiguredWallet(): boolean {
+  return configuredSecret() !== null;
+}
+
+/** Address of the configured wallet, for display before connecting. Null if none/invalid. */
+export async function configuredWalletAddress(): Promise<string | null> {
+  const secret = configuredSecret();
+  if (!secret) return null;
+  const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+  try {
+    return Ed25519Keypair.fromSecretKey(secret).toSuiAddress();
+  } catch {
+    return null;
+  }
+}
+
 /** A signer the OrderClient can use to sign + execute PTBs. Satisfied by both the
  *  burner keypair (localnet) and a dapp-kit wallet adapter (testnet). */
 export interface WalletSigner {
@@ -44,6 +72,16 @@ function storeSecret(secret: string): void {
 /** Get-or-create the persisted burner keypair. Persists the bech32 secret in localStorage. */
 export async function getBurnerKeypair(): Promise<Ed25519KeypairT> {
   const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+  // A configured account key (VITE_WALLET_SK) wins — sign as the real account so the wallet
+  // UI shows our actual address + balances. Not persisted (it comes from env, not storage).
+  const configured = configuredSecret();
+  if (configured) {
+    try {
+      return Ed25519Keypair.fromSecretKey(configured);
+    } catch {
+      /* malformed VITE_WALLET_SK — fall back to a generated burner below */
+    }
+  }
   const stored = loadStoredSecret();
   if (stored) {
     try {

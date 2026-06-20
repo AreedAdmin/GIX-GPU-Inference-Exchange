@@ -369,3 +369,18 @@
     transform: rotate(360deg);
   }
 }
+
+/* ── reduce glassmorphism on the wallet dropdown ──────────────────────────────
+ * The elevation-3 GlassPanel is intentionally very translucent (≈ --glass-bg
+ * fill + ~18px backdrop blur). Floating over the live trading view, the order
+ * book / chart behind it bled through and hurt legibility. Scope a near-opaque
+ * fill + a much lighter blur to the wallet popup ONLY — every other glass panel
+ * keeps the full effect. The descendant selector (and :hover) outrank the
+ * .glass-3 / .glass-interactive:hover rules in index.css. */
+.wm-dropdown .wm-panel-surface,
+.wm-dropdown .wm-panel-surface:hover {
+  /* ~96% opaque raised surface — a hint of depth, no see-through clutter */
+  background: color-mix(in srgb, var(--bg-2, #131a23) 96%, transparent);
+  -webkit-backdrop-filter: blur(6px) saturate(118%);
+  backdrop-filter: blur(6px) saturate(118%);
+}

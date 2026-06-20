@@ -33,7 +33,11 @@ import type { WalletWithRequiredFeatures } from "@mysten/wallet-standard";
 import { GlassPanel as RawGlassPanel } from "./GlassPanel";
 import { useGix } from "../store";
 import { loadChainConfig, type GixNetwork } from "../trade/config";
-import { clearBurner } from "../trade/burner";
+import {
+  clearBurner,
+  hasConfiguredWallet,
+  configuredWalletAddress,
+} from "../trade/burner";
 import "./WalletMenu.css";
 
 const cfg = loadChainConfig();
@@ -150,8 +154,26 @@ function suiscanUrl(network: string, addr: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function WalletMenu() {
-  const isRealWalletPath = cfg.network !== "localnet";
-  return isRealWalletPath ? <RealWalletMenu /> : <BurnerWalletMenu />;
+  // A configured account key (VITE_WALLET_SK) is signed locally rather than via a browser
+  // extension, so use the store-backed menu — which shows the real address + balances — on
+  // ANY network. Otherwise: real wallet-connect on testnet/mainnet, burner on localnet.
+  const useStorePath = hasConfiguredWallet() || cfg.network === "localnet";
+  return useStorePath ? <BurnerWalletMenu /> : <RealWalletMenu />;
+}
+
+/** Address of the configured account (VITE_WALLET_SK), loaded async for display. */
+function useConfiguredAddress(): string | null {
+  const [addr, setAddr] = useState<string | null>(null);
+  useEffect(() => {
+    let on = true;
+    void configuredWalletAddress().then((a) => {
+      if (on) setAddr(a);
+    });
+    return () => {
+      on = false;
+    };
+  }, []);
+  return addr;
 }
 
 // ── REAL WALLET (dapp-kit) ───────────────────────────────────────────────────
@@ -288,6 +310,10 @@ function BurnerWalletMenu() {
   const { account, balances, connecting, connectWallet, refreshBalances } = useGix();
   const ctx = useSuiClientContext();
   const address = account?.address ?? null;
+  // When a real account key is configured (VITE_WALLET_SK), this is OUR account — present it
+  // as a normal connected wallet (real address, no "burner/demo" wording).
+  const realAccount = hasConfiguredWallet();
+  const configuredAddr = useConfiguredAddress();
 
   const rows: BalanceRow[] = [
     { sym: "SUI", amt: balances ? fmtUnits(balances.sui, 0, 4) : "—" },
@@ -324,6 +350,7 @@ function BurnerWalletMenu() {
         {(close) => (
           <ConnectList
             wallets={[]}
+            configuredAddr={configuredAddr}
             onBurner={() => {
               void connectWallet().finally(close);
             }}
@@ -349,6 +376,7 @@ function BurnerWalletMenu() {
           onSelectNetwork={(n) => ctx.selectNetwork(n)}
           onRefresh={() => void refreshBalances()}
           isBurner
+          realAccount={realAccount}
           onDisconnect={() => {
             clearBurner();
             close();
@@ -404,15 +432,18 @@ function ConnectList({
   wallets,
   onPick,
   onBurner,
+  configuredAddr,
 }: {
   wallets: WalletWithRequiredFeatures[];
   onPick?: (w: WalletWithRequiredFeatures) => void;
   onBurner: () => void;
+  /** When set, the local-signer entry shows this real address instead of "Burner". */
+  configuredAddr?: string | null;
 }) {
   return (
     <div className="wm-panel" role="menu" aria-label="Connect a wallet">
-      <div className="wm-section-label">Detected wallets</div>
-      {wallets.length === 0 && (
+      <div className="wm-section-label">{configuredAddr ? "Account" : "Detected wallets"}</div>
+      {wallets.length === 0 && !configuredAddr && (
         <div className="wm-row" aria-disabled style={{ cursor: "default" }}>
           <span className="wm-row__label wm-row__sub">No browser wallets detected</span>
         </div>
@@ -441,13 +472,19 @@ function ConnectList({
           <span className="wm-row__label">{w.name}</span>
         </button>
       ))}
-      <div className="wm-divider" />
+      {wallets.length > 0 && <div className="wm-divider" />}
       <button type="button" role="menuitem" className="wm-row" onClick={onBurner}>
-        <span className="wm-row__icon">
-          <Icon d={ICONS.spark} size={16} />
+        {configuredAddr ? (
+          <Avatar address={configuredAddr} />
+        ) : (
+          <span className="wm-row__icon">
+            <Icon d={ICONS.spark} size={16} />
+          </span>
+        )}
+        <span className="wm-row__label">
+          {configuredAddr ? truncAddr(configuredAddr) : "Burner"}
         </span>
-        <span className="wm-row__label">Burner</span>
-        <span className="wm-row__sub">demo</span>
+        <span className="wm-row__sub">{configuredAddr ? "this device" : "demo"}</span>
       </button>
     </div>
   );
@@ -462,6 +499,7 @@ function ConnectedBody({
   onRefresh,
   onDisconnect,
   isBurner = false,
+  realAccount = false,
 }: {
   address: string;
   balances: BalanceRow[];
@@ -471,6 +509,8 @@ function ConnectedBody({
   onRefresh: () => void;
   onDisconnect: () => void;
   isBurner?: boolean;
+  /** A real configured account (VITE_WALLET_SK) — present as a normal wallet, not a demo. */
+  realAccount?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const copy = useCallback(async () => {
@@ -493,7 +533,7 @@ function ConnectedBody({
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="wm-head__addr">{address}</div>
           <div className="wm-head__meta">
-            {isBurner ? "Burner · demo signer" : "Connected wallet"}
+            {isBurner && !realAccount ? "Burner · demo signer" : "Connected wallet"}
           </div>
         </div>
         <button
@@ -588,7 +628,9 @@ function ConnectedBody({
           <span className="wm-row__icon">
             <Icon d={ICONS.logout} size={15} />
           </span>
-          <span className="wm-row__label">{isBurner ? "Reset burner" : "Disconnect"}</span>
+          <span className="wm-row__label">
+            {isBurner && !realAccount ? "Reset burner" : "Disconnect"}
+          </span>
         </button>
       </div>
     </div>
