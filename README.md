@@ -74,6 +74,12 @@ attested with a registered-key signature **verified on-chain**, settled to the p
 returned **hash-verified** — through both the gateway and the web console.
 → [demo runbook](DEMO.md) · [roadmap](docs/roadmap.md)
 
+<div align="center">
+<img src="assets/trading-ui.png" alt="GIX web trading console — live order book, positions, and on-chain audit trail" width="960"/>
+<br/>
+<sub>The web trading console — live order book, open positions, and a per-job on-chain audit trail.</sub>
+</div>
+
 ---
 
 ## Locked v1 decisions
