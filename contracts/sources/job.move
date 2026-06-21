@@ -22,6 +22,7 @@ use gix::events;
 use gix::market::Market;
 use gix::registry::{Self, ProviderRecord};
 use gix::staking::{Self, ProviderStake};
+use std::hash;
 use sui::balance::{Self, Balance};
 use sui::clock::Clock;
 use sui::coin::Coin;
@@ -33,8 +34,16 @@ const EWrongProvider: u64 = 304;
 const EZeroQty: u64 = 405;
 const EInsufficientEscrow: u64 = 407;
 const EWrongMarket: u64 = 408;
+/// Inline on-chain input (Option 3): the provided `input` bytes either do not hash to the
+/// committed `input_hash` (`sha2_256(input) != input_hash`) or exceed `MAX_INLINE_INPUT`.
+const EBadInlineInput: u64 = 409;
 const EAttestDeadline: u64 = 500;
 const EAlreadyAttested: u64 = 503;
+
+// === Inline input (Option 3 — tunnel-free demo) ===
+/// Max size of a prompt carried inline in the `create_job_from_ask` transaction. Small prompts
+/// ride on-chain (`Job.input`); anything larger uses the Walrus-blob path (`input_blob_id`).
+const MAX_INLINE_INPUT: u64 = 16384;
 
 // === Lifecycle states (Job.state) ===
 const STATE_DISPATCHED: u8 = 3; // created+escrowed+dispatched in one tx
@@ -93,6 +102,11 @@ public struct Job<phantom M, phantom Q> has key {
     is_fill: bool,
     // content bindings
     input_hash: vector<u8>,
+    /// Option 3 (inline on-chain input): the raw prompt bytes carried in the creation tx, used
+    /// to drive a tunnel-free demo. Empty `vector[]` when the Walrus-blob path (`input_blob_id`)
+    /// is used instead. When non-empty it is guaranteed (at creation) that
+    /// `sha2_256(input) == input_hash` and `length(input) <= MAX_INLINE_INPUT`.
+    input: vector<u8>,
     output_hash: vector<u8>,
     /// M2 (additive): Walrus blob id COMMITMENTS for the job I/O. `input_blob_id` is the
     /// prompt blob the consumer committed at creation; `output_blob_id` is the completion
@@ -162,6 +176,7 @@ public fun create_job<M, Q>(
         option::some(escrow::lock(escrow_in, ctx.sender())),
         price_usdc,
         false, // M1 owned-credits path: USDC escrow held against delivery.
+        vector[], // no inline input on the M1 owned-credits path
         input_hash,
         0, // no Walrus input blob on the M1 owned-credits path
         clk,
@@ -239,6 +254,7 @@ public fun create_job_from_fill<M, Q>(
         option::none<Escrow<Q>>(), // Option B: no Q escrow — provider already paid at the fill.
         price_usdc,
         true, // fill-job
+        vector[], // fill-job keeps the Walrus-blob input path (no inline input this milestone)
         input_hash,
         input_blob_id,
         clk,
@@ -272,6 +288,7 @@ public fun create_job_from_ask<M, Q>(
     ask: &mut Ask<M>,
     qty_scu: u64,
     escrow_in: Coin<Q>,
+    input: vector<u8>,
     input_hash: vector<u8>,
     clk: &Clock,
     ctx: &mut TxContext,
@@ -287,6 +304,17 @@ public fun create_job_from_ask<M, Q>(
     let required = (qty_scu as u128) * (ask::price_usdc_per_scu<M>(ask) as u128);
     assert!((price as u128) >= required, EInsufficientEscrow);
 
+    // Option 3 (inline on-chain input, tunnel-free): if the consumer carried the prompt bytes
+    // inline, enforce on-chain that they hash to the committed `input_hash` and are within the
+    // inline size bound. An empty `input` is the unchanged Walrus-blob path (validated nowhere
+    // here — `input_blob_id` carries the commitment instead).
+    if (!vector::is_empty(&input)) {
+        assert!(vector::length(&input) <= MAX_INLINE_INPUT, EBadInlineInput);
+        // NB: `sha2_256` lives in `std::hash` (move-stdlib), the same digest the node/audit use
+        // (see `gix::attestation`). `input` is `copy`, so hashing it leaves it usable below.
+        assert!(hash::sha2_256(input) == input_hash, EBadInlineInput);
+    };
+
     let provider = ask::provider<M>(ask);
     let credits = ask::draw<M>(ask, qty_scu);
 
@@ -300,8 +328,9 @@ public fun create_job_from_ask<M, Q>(
         option::some(escrow::lock(escrow_in, ctx.sender())),
         price,
         false, // M1.5 Ask path: USDC escrow held against delivery.
+        input,
         input_hash,
-        0, // no Walrus input blob on the M1.5 Ask path
+        0, // no Walrus input blob on the M1.5 Ask path (input rides inline or is empty)
         clk,
         ctx,
     )
@@ -322,6 +351,7 @@ fun build_and_share<M, Q>(
     escrow_opt: Option<Escrow<Q>>,
     price_usdc: u64,
     is_fill: bool,
+    input: vector<u8>,
     input_hash: vector<u8>,
     input_blob_id: u256,
     clk: &Clock,
@@ -338,6 +368,7 @@ fun build_and_share<M, Q>(
         state: STATE_DISPATCHED,
         is_fill,
         input_hash,
+        input,
         output_hash: vector[],
         input_blob_id,
         output_blob_id: 0,
@@ -483,6 +514,12 @@ public fun job_escrow_value<M, Q>(job: &Job<M, Q>): u64 {
     if (option::is_some(&job.escrow)) escrow::value(option::borrow(&job.escrow)) else 0
 }
 public fun job_output_hash<M, Q>(job: &Job<M, Q>): vector<u8> { job.output_hash }
+/// Option 3 (inline on-chain input): the raw prompt bytes carried inline at creation, or an
+/// empty vector when the Walrus-blob path (`input_blob_id`) was used. When non-empty it is
+/// guaranteed that `sha2_256(input) == input_hash` and `length(input) <= MAX_INLINE_INPUT`.
+public fun job_input<M, Q>(job: &Job<M, Q>): &vector<u8> { &job.input }
+/// Max inline-input size enforced by `create_job_from_ask` (Option 3). Exposed for callers/tests.
+public fun max_inline_input(): u64 { MAX_INLINE_INPUT }
 /// Whether this is a DeepBook fill-job (Option B — no escrow, provider paid at the match).
 public fun job_is_fill<M, Q>(job: &Job<M, Q>): bool { job.is_fill }
 /// Walrus blob id COMMITMENTS (not content hashes). `0` = none recorded.

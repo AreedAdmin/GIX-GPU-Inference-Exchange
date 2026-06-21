@@ -318,7 +318,7 @@ fun gb10_qwen_ask_fill_over_generic_quote_coin() {
         let clk = sc.take_shared<Clock>();
         let escrow = mint_tusd(&mut sc, QTY * 100_000);
         let _job_id = job::create_job_from_ask<M_GB10_QWEN35B, TUSD>(
-            &cfg, &market, &mut ask, QTY, escrow, b"input-hash-qwen", &clk, sc.ctx(),
+            &cfg, &market, &mut ask, QTY, escrow, vector[], b"input-hash-qwen", &clk, sc.ctx(),
         );
         ts::return_shared(cfg);
         ts::return_shared(market);

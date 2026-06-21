@@ -205,7 +205,46 @@ public fun create_job_from_ask(
         &mut ask,
         qty,
         escrow,
+        vector[], // empty inline input → unchanged Walrus-blob behavior
         input_hash(),
+        &clk,
+        sc.ctx(),
+    );
+
+    ts::return_shared(cfg);
+    ts::return_shared(market);
+    ts::return_shared(ask);
+    ts::return_shared(clk);
+    job_id
+}
+
+/// Like `create_job_from_ask`, but carries the prompt bytes INLINE on-chain (Option 3,
+/// tunnel-free): the consumer passes the raw `input` and its committed `input_hash`. The
+/// returned Job's `input` field holds the bytes (when they hash-match and fit). Used by the
+/// inline-input tests; the happy path expects `sha2_256(input) == input_hash`.
+public fun create_job_from_ask_inline(
+    sc: &mut Scenario,
+    buyer: address,
+    qty: u64,
+    escrow_amt: u64,
+    input: vector<u8>,
+    input_hash: vector<u8>,
+): ID {
+    sc.next_tx(buyer);
+    let cfg = sc.take_shared<Config>();
+    let market = sc.take_shared<Market<M_H100_LLAMA8B>>();
+    let mut ask = sc.take_shared<Ask<M_H100_LLAMA8B>>();
+    let clk = sc.take_shared<Clock>();
+    let escrow = mint_usdc(sc, escrow_amt);
+
+    let job_id = job::create_job_from_ask<M_H100_LLAMA8B, MOCK_USDC>(
+        &cfg,
+        &market,
+        &mut ask,
+        qty,
+        escrow,
+        input,
+        input_hash,
         &clk,
         sc.ctx(),
     );
