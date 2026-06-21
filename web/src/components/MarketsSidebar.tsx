@@ -17,26 +17,7 @@ export function MarketsSidebar() {
   // (drive the trading view); Crypto = currency→dollar exchange routes (drive the
   // on-ramp swap below). Switching here only changes the list, never the trade panel.
   const [category, setCategory] = useState<Category>("gpu");
-  const [catOpen, setCatOpen] = useState(false);
   const [selectedPair, setSelectedPair] = useState<string>(CRYPTO_PAIRS[0]?.id ?? "");
-  const ddRef = useRef<HTMLDivElement>(null);
-
-  // close the category dropdown on outside click / Esc
-  useEffect(() => {
-    if (!catOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ddRef.current && !ddRef.current.contains(e.target as Node)) setCatOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCatOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [catOpen]);
 
   const count = category === "gpu" ? markets.length : CRYPTO_PAIRS.length;
 
@@ -47,51 +28,32 @@ export function MarketsSidebar() {
         <span className="label-micro text-muted">{count}</span>
       </header>
 
-      {/* category dropdown: GPU Compute ⇄ Crypto Pairs */}
-      <div ref={ddRef} className="relative shrink-0 border-b border-border-glass px-2 py-2">
-        <button
-          type="button"
-          onClick={() => setCatOpen((o) => !o)}
-          aria-haspopup="listbox"
-          aria-expanded={catOpen}
-          className="focus-amber flex w-full items-center justify-between gap-2 rounded-md border border-border-glass bg-elev/40 px-2.5 py-1.5 transition hover:border-accent/40"
-        >
-          <span className="flex min-w-0 items-center gap-2">
+      {/* category selector: GPU Compute ⇄ Crypto Pairs.
+          Native <select> on purpose — its option list renders at the OS layer, so it can
+          never be clipped by the glass card's overflow/backdrop-filter or stacked out of
+          view (the bug a custom popover hit here). */}
+      <div className="shrink-0 border-b border-border-glass px-2 py-2">
+        <div className="relative">
+          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2">
             <CatIcon category={category} />
-            <span className="truncate text-[12px] font-medium text-primary">
-              {CATEGORY_LABEL[category]}
-            </span>
           </span>
-          <Caret open={catOpen} />
-        </button>
-        {catOpen && (
-          <div
-            role="listbox"
-            className="absolute left-2 right-2 top-full z-20 mt-1 overflow-hidden rounded-md border border-border-glass shadow-xl"
-            style={{ background: "var(--bg-2)" }}
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value as Category)}
+            aria-label="Market category"
+            className="focus-amber w-full cursor-pointer appearance-none rounded-md border border-border-glass bg-elev/40 py-1.5 pl-8 pr-8 text-[12px] font-medium text-primary transition hover:border-accent/40"
+            style={{ colorScheme: "dark" }}
           >
             {(Object.keys(CATEGORY_LABEL) as Category[]).map((c) => (
-              <button
-                key={c}
-                type="button"
-                role="option"
-                aria-selected={c === category}
-                onClick={() => {
-                  setCategory(c);
-                  setCatOpen(false);
-                }}
-                className={`flex w-full items-center gap-2 px-2.5 py-2 text-left text-[12px] transition ${
-                  c === category
-                    ? "bg-accent/[0.08] text-primary"
-                    : "text-secondary hover:bg-accent/[0.05]"
-                }`}
-              >
-                <CatIcon category={c} />
-                <span>{CATEGORY_LABEL[c]}</span>
-              </button>
+              <option key={c} value={c}>
+                {CATEGORY_LABEL[c]}
+              </option>
             ))}
-          </div>
-        )}
+          </select>
+          <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2">
+            <Caret open={false} />
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-[1fr_auto_auto] gap-x-2 border-b border-border-glass px-3 py-1.5">
