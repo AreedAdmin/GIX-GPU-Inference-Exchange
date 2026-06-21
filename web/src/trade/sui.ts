@@ -261,8 +261,23 @@ export class SuiOrderClient implements OrderClient {
       };
     }
 
-    const escrowBase = toBaseUnits(args.qtyScu * args.priceUsdcPerScu);
-    if (escrowBase <= 0) return { ok: false, error: "escrow must be > 0 (set a price)" };
+    // Filling an Ask pays the ASK's on-chain price (`price_usdc_per_scu`, already in base
+    // units) — NOT the UI price. escrow = qty * ask price. (The UI price is for limit trades.)
+    let escrowBase: number;
+    try {
+      const askObj = await this.client.getObject({
+        id: market.askId,
+        options: { showContent: true },
+      });
+      const askFields =
+        (askObj.data?.content as { fields?: Record<string, unknown> } | undefined)?.fields ?? {};
+      const askPriceBase = Number(askFields.price_usdc_per_scu ?? 0);
+      escrowBase = args.qtyScu * askPriceBase;
+    } catch (e) {
+      return { ok: false, error: `could not read Ask price: ${(e as Error).message}` };
+    }
+    if (escrowBase <= 0)
+      return { ok: false, error: "ask price unavailable — is the Ask provisioned?" };
 
     // 1. Inline input: the prompt's UTF-8 bytes ride in the tx, and the integrity hash is
     //    sha2_256(prompt) computed client-side (WebCrypto — byte-identical to Move's
