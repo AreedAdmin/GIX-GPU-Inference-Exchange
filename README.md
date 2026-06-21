@@ -80,6 +80,18 @@ returned **hash-verified** — through both the gateway and the web console.
 <sub>The web trading console — live order book, open positions, and a per-job on-chain audit trail.</sub>
 </div>
 
+<div align="center">
+<img src="assets/trading-ui-inference.png" alt="GIX console inference result — the model's output rendered in-app alongside its input/output Walrus blob IDs and measured latency" width="960"/>
+<br/>
+<sub>Fill out and run an inference from the console — the model's output returns in-app with its input/output Walrus blob IDs and latency, hash-verifiable against chain + Walrus.</sub>
+</div>
+
+<div align="center">
+<img src="assets/trx-on-chain.png" alt="Suiscan transaction block — a successful create_job_from_ask call recording the inference job on Sui testnet" width="960"/>
+<br/>
+<sub>The same inference, verified on-chain — a successful <code>create_job_from_ask</code> transaction on Sui testnet, re-checkable in any block explorer.</sub>
+</div>
+
 ---
 
 ## Locked v1 decisions
