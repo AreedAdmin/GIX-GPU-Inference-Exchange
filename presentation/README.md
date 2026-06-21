@@ -5,6 +5,7 @@ A self-contained slide deck and per-slide speaker scripts for presenting the GPU
 ## Contents
 - **[`presentation.html`](presentation.html)** — the deck. Open it in any browser (or host via GitHub Pages). 10 slides, light "Palantir" theme, keyboard-navigable.
 - **[`scripts/`](scripts/)** — one Markdown speaker script per slide (full narration + on-screen cue + duration + transition line).
+- **[`purchase-use-demo.md`](purchase-use-demo.md)** — the live-demo runbook: three ways to buy &amp; use compute (web console · SDK · OpenAI-compatible gateway), with exact steps, commands, SuiScan links, and what to say on screen.
 
 ## Presenting
 - **Navigate:** `←` / `→` (or click the arrows / dots), `Home` / `End` to jump.
