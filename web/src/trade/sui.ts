@@ -371,7 +371,7 @@ export class SuiOrderClient implements OrderClient {
     //   only `M` is given as an explicit type arg (mirrors the create_job PTB).
     tx.moveCall({
       target: `${this.cfg.packageId}::job::create_job_from_ask`,
-      typeArguments: [market.creditType],
+      typeArguments: [market.creditType, this.cfg.usdcType],
       arguments: [
         tx.object(this.cfg.configId),
         tx.object(market.id),
