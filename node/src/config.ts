@@ -140,7 +140,17 @@ export interface NodeConfig {
   walrusEpochs: number;
   /** Optional override for the Walrus WASM url (else the SDK default is used). */
   walrusWasmUrl?: string;
+  /**
+   * Walrus upload-relay host for output/quote blob writes. Direct-to-storage-node writes are
+   * flaky on testnet (NotEnoughBlobConfirmationsError); the relay offloads the sliver writes.
+   * Defaults to the testnet relay on testnet; undefined (direct writes) on localnet. Override
+   * via GIX_WALRUS_RELAY (set to "off"/"none"/"0"/"" to disable even on testnet).
+   */
+  walrusRelayHost?: string;
 }
+
+/** The default Walrus upload relay for testnet output/quote blob writes. */
+export const DEFAULT_WALRUS_RELAY = "https://upload-relay.testnet.walrus.space";
 
 function env(name: string, fallback?: string): string {
   const v = process.env[name];
@@ -263,7 +273,25 @@ export function loadConfig(): NodeConfig {
     walrusEnabled,
     walrusEpochs: envInt("GIX_WALRUS_EPOCHS", 5),
     walrusWasmUrl: process.env.GIX_WALRUS_WASM_URL || undefined,
+    // Upload-relay reliability fix: default the testnet relay on testnet, off on localnet.
+    // GIX_WALRUS_RELAY overrides; "off"/"none"/"0"/"" disables (direct-to-node writes).
+    walrusRelayHost: resolveWalrusRelay(network),
   };
+}
+
+/**
+ * Resolve the Walrus upload-relay host. On testnet defaults to {@link DEFAULT_WALRUS_RELAY};
+ * elsewhere off by default. GIX_WALRUS_RELAY overrides the host, or disables it when set to
+ * one of off/none/0 or empty.
+ */
+function resolveWalrusRelay(network: GixNetwork): string | undefined {
+  const v = process.env.GIX_WALRUS_RELAY;
+  if (v !== undefined) {
+    const t = v.trim();
+    if (t === "" || /^(off|none|0|false)$/i.test(t)) return undefined;
+    return t;
+  }
+  return network === "testnet" ? DEFAULT_WALRUS_RELAY : undefined;
 }
 
 /** The bound DeepBook pool id for a market, or undefined when unset. */

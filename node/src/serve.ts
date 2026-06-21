@@ -37,14 +37,39 @@ export interface ServeDeps {
   log: (msg: string) => void;
 }
 
-/** Resolve the prompt for a job: from Walrus by input_blob_id, else the /inputs cache. */
+/**
+ * Resolve the prompt for a job, in priority order (docs/option3-inline-input-interface.md §B):
+ *   1. Inline on-chain input (`job.input`, non-empty) → UTF-8 decode it. Verify
+ *      sha2_256(input) == on-chain input_hash (defense in depth) before trusting it.
+ *      No Walrus read, no /inputs cache — the tunnel-free path.
+ *   2. else input_blob_id != 0 → read from Walrus (M2 path).
+ *   3. else → the /inputs cache (legacy / localnet fallback).
+ */
 async function resolvePrompt(
   job: DispatchedJob,
   inputBlobId: bigint,
+  input: Uint8Array,
   deps: ServeDeps,
 ): Promise<string | undefined> {
   const { store, walrus, log } = deps;
-  // M2: if the job committed a Walrus input blob and Walrus is available, read it from there.
+
+  // 1. Inline on-chain input (Option 3 — tunnel-free). The contract already enforces
+  //    sha2_256(input) == input_hash on create_job_from_ask; we re-verify here (defense in
+  //    depth) before signing a binding over it.
+  if (input.length > 0) {
+    const onChain = job.inputHash.startsWith("0x") ? job.inputHash.slice(2) : job.inputHash;
+    if (sha2_256BytesHex(input).toLowerCase() !== onChain.toLowerCase()) {
+      log(`[serve] job ${job.jobId}: inline on-chain input hash != input_hash — refusing`);
+      return undefined;
+    }
+    const prompt = new TextDecoder().decode(input);
+    log(`[serve] job ${job.jobId}: using inline on-chain input (${input.length} bytes) — tunnel-free`);
+    // Cache so /result and any retry are fast.
+    store.putPrompt(onChain, prompt);
+    return prompt;
+  }
+
+  // 2. M2: if the job committed a Walrus input blob and Walrus is available, read it from there.
   if (inputBlobId !== 0n && walrus) {
     try {
       const bytes = await walrus.readByInt(inputBlobId);
@@ -84,17 +109,19 @@ export async function serveJob(
   // identical to M1 (prompt from /inputs cache, settle via settle/resolve_attested).
   let isFill = false;
   let inputBlobId = 0n;
+  let input: Uint8Array = new Uint8Array(0);
   if (deps.chain) {
     const meta = await deps.chain.getJobMeta(job.jobId);
     isFill = meta.isFill;
     inputBlobId = meta.inputBlobId;
+    input = meta.input ?? input;
   }
 
-  const prompt = await resolvePrompt(job, inputBlobId, deps);
+  const prompt = await resolvePrompt(job, inputBlobId, input, deps);
   if (prompt === undefined) {
     log(
       `[serve] job ${job.jobId}: no prompt available for input_hash ${job.inputHash} ` +
-        `(consumer must POST /inputs or upload the Walrus input blob first) — skipping`,
+        `(consumer must carry inline input, upload the Walrus input blob, or POST /inputs first) — skipping`,
     );
     return null;
   }

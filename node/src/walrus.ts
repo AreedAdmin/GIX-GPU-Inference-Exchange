@@ -47,6 +47,24 @@ export interface WalrusDeps {
   epochs: number;
   /** Optional Walrus WASM url override. */
   wasmUrl?: string;
+  /**
+   * Optional upload-relay config (mirrors sdk/src/walrus.ts). Writing a blob directly to the
+   * ~hundreds of testnet storage nodes is ~2200 requests and is flaky against slow nodes
+   * (NotEnoughBlobConfirmationsError). Pointing at an upload relay offloads the sliver writes
+   * to a server and is far more reliable. Passed straight through to `@mysten/walrus`'s
+   * client extension (`{ host, sendTip }`).
+   */
+  uploadRelay?: { host: string; sendTip?: { max?: number; address?: string; kind?: unknown } };
+  /**
+   * Optional storage-node fetch tuning (e.g. a longer `timeout` to survive slow testnet
+   * nodes whose default 10s connect timeout causes write/read failures). Passed straight
+   * through to `@mysten/walrus`.
+   */
+  storageNodeClientOptions?: {
+    timeout?: number;
+    fetch?: (url: string, options: unknown) => Promise<Response>;
+    onError?: (error: unknown) => void;
+  };
   log: (msg: string) => void;
 }
 
@@ -76,8 +94,17 @@ export class WalrusIO {
       throw new Error(`Walrus is not available on ${this.deps.network} (use testnet/mainnet)`);
     }
     const base = new SuiJsonRpcClient({ network: this.deps.network, url: this.deps.rpcUrl });
+    // Pass wasmUrl + (the reliability fix) uploadRelay / storageNodeClientOptions straight
+    // through to the @mysten/walrus client extension, mirroring sdk/src/walrus.ts. The relay
+    // offloads sliver writes so output/quote uploads aren't the flaky direct-to-storage-node path.
+    const walrusOpts: Record<string, unknown> = {};
+    if (this.deps.wasmUrl) walrusOpts.wasmUrl = this.deps.wasmUrl;
+    if (this.deps.uploadRelay) walrusOpts.uploadRelay = this.deps.uploadRelay;
+    if (this.deps.storageNodeClientOptions) {
+      walrusOpts.storageNodeClientOptions = this.deps.storageNodeClientOptions;
+    }
     const extended = base.$extend(
-      walrus(this.deps.wasmUrl ? { wasmUrl: this.deps.wasmUrl } : undefined),
+      walrus(Object.keys(walrusOpts).length > 0 ? (walrusOpts as never) : undefined),
     );
     this.client = extended as unknown as WalrusExtendedClient;
     this.blobIdToInt = blobIdToInt;

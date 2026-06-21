@@ -163,9 +163,16 @@ async function main(): Promise<void> {
       signer: keys.suiKeypair,
       epochs: cfg.walrusEpochs,
       wasmUrl: cfg.walrusWasmUrl,
+      // Reliability fix: route output/quote sliver writes through the upload relay (testnet
+      // default), and give slow testnet nodes a longer read/connect timeout than the 10s default.
+      ...(cfg.walrusRelayHost
+        ? { uploadRelay: { host: cfg.walrusRelayHost, sendTip: { max: 1_000 } } }
+        : {}),
+      storageNodeClientOptions: { timeout: 60_000 },
       log,
     });
-    log(`[node] Walrus I/O enabled (network=${cfg.network}, retain ${cfg.walrusEpochs} epochs). ` +
+    log(`[node] Walrus I/O enabled (network=${cfg.network}, retain ${cfg.walrusEpochs} epochs` +
+      `${cfg.walrusRelayHost ? `, relay ${cfg.walrusRelayHost}` : ", direct writes"}). ` +
       `Tx address must hold WAL (+ SUI gas).`);
   } else if (cfg.walrusEnabled) {
     log(`[node] WARNING: GIX_WALRUS set but network=${cfg.network} is not testnet/mainnet — Walrus disabled.`);

@@ -62,6 +62,12 @@ export interface JobMeta {
   isFill: boolean;
   /** Walrus input (prompt) blob commitment as u256; 0n = none (use /inputs cache). */
   inputBlobId: bigint;
+  /**
+   * Option 3 (inline tunnel-free path): the on-chain `job.input` raw prompt bytes
+   * (`vector<u8>`), empty when the Walrus-blob / /inputs path is used instead. When
+   * non-empty the serve loop decodes it directly — no Walrus read, no /inputs cache.
+   */
+  input: Uint8Array;
 }
 
 type AttestMode = "signed" | "mock";
@@ -357,21 +363,30 @@ export class NodeChain {
    * blob commitment. Fill-jobs (create_job_from_fill) MUST settle via settle_fill /
    * resolve_fill (the contract rejects the old settle/resolve_attested on them), and the
    * input prompt may need to be fetched from Walrus (input_blob_id != 0) rather than the
-   * /inputs cache. Falls back to {isFill:false, inputBlobId:0n} if the read is ambiguous.
+   * /inputs cache. Falls back to {isFill:false, inputBlobId:0n, input:empty} if the read
+   * is ambiguous.
+   *
+   * Option 3: also surfaces the inline on-chain `input: vector<u8>` (the raw prompt bytes,
+   * empty when the Walrus path is used). The RPC returns a `vector<u8>` as a JSON number
+   * array (or, on some fullnodes, a base64 string) — bytesOf() handles both encodings.
    */
   async getJobMeta(jobId: string): Promise<JobMeta> {
     await this.connect();
+    const empty = new Uint8Array(0);
     try {
       const obj = await this.client.getObject({ id: jobId, options: { showContent: true } });
       const content = obj.data?.content;
-      if (!content || content.dataType !== "moveObject") return { isFill: false, inputBlobId: 0n };
+      if (!content || content.dataType !== "moveObject") {
+        return { isFill: false, inputBlobId: 0n, input: empty };
+      }
       const fields = (content as unknown as { fields: Record<string, unknown> }).fields;
       const isFill = boolOf(fields, "is_fill");
       const inputBlobId = u256Of(fields, "input_blob_id");
-      return { isFill, inputBlobId };
+      const input = bytesOf(fields, "input");
+      return { isFill, inputBlobId, input };
     } catch (e) {
       this.log(`[chain] getJobMeta(${jobId}) error: ${(e as Error).message}`);
-      return { isFill: false, inputBlobId: 0n };
+      return { isFill: false, inputBlobId: 0n, input: empty };
     }
   }
 
@@ -705,6 +720,25 @@ function boolOf(f: Record<string, unknown>, k: string): boolean {
   if (typeof v === "boolean") return v;
   if (typeof v === "string") return v === "true";
   return false;
+}
+
+/**
+ * Read a Move `vector<u8>` field off a getObject content blob as raw bytes. The JSON-RPC
+ * encodes a `vector<u8>` either as a JSON number array (the common case) or — depending on
+ * the fullnode / field — as a base64 string. Returns an empty Uint8Array when absent/empty,
+ * so callers can treat "no inline input" uniformly.
+ */
+function bytesOf(f: Record<string, unknown>, k: string): Uint8Array {
+  const v = f[k];
+  if (v == null) return new Uint8Array(0);
+  if (v instanceof Uint8Array) return v;
+  if (Array.isArray(v)) return Uint8Array.from(v as number[]);
+  if (typeof v === "string") {
+    // 0x-hex (e.g. if surfaced as bytes) or base64 (default vector<u8> string encoding).
+    if (/^0x[0-9a-fA-F]*$/.test(v)) return Uint8Array.from(Buffer.from(v.slice(2), "hex"));
+    return Uint8Array.from(Buffer.from(v, "base64"));
+  }
+  return new Uint8Array(0);
 }
 
 /** Read a u256 move field (returned by RPC as a decimal string) as a bigint. 0n if absent. */
