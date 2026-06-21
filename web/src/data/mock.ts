@@ -19,6 +19,7 @@ import type {
   Unsub,
 } from "./types";
 import { loadChainConfig } from "../trade/config";
+import { CRYPTO_PAIRS } from "./cryptoPairs";
 
 type Cb<T> = (v: T) => void;
 
@@ -143,6 +144,16 @@ function round(n: number, dp: number) {
   return Math.round(n * f) / f;
 }
 
+// Crypto pairs are chartable too: seed them into the sim universe (state + book + ticker +
+// trades) so selecting one in the sidebar drives the chart. They are intentionally NOT
+// returned by markets() — that stays GPU-only (TopBar dropdown + the GPU list). Their
+// base/quote labels are cosmetic here; only id + price seed the simulator.
+const CRYPTO_SIM: SimMarket[] = CRYPTO_PAIRS.map((p) =>
+  mkMarket(p.id, `${p.base} / ${p.quote}`, p.last, 0.004, 0, 0),
+);
+// Everything the simulator drives (GPU markets + crypto pairs). markets() returns MARKETS.
+const UNIVERSE: SimMarket[] = [...MARKETS, ...CRYPTO_SIM];
+
 export class MockDataSource implements MarketDataSource {
   readonly kind = "mock" as const;
 
@@ -172,7 +183,7 @@ export class MockDataSource implements MarketDataSource {
   }[] = [];
 
   constructor() {
-    for (const m of MARKETS) {
+    for (const m of UNIVERSE) {
       const mid = m.basePrice;
       this.state.set(m.id, {
         mid,
@@ -214,7 +225,7 @@ export class MockDataSource implements MarketDataSource {
     this.spawnJob();
     this.spawnJob();
     // emit one immediate snapshot per market so the UI paints instantly
-    for (const m of MARKETS) {
+    for (const m of UNIVERSE) {
       this.emitBook(m.id);
       this.emitTicker(m.id);
     }
@@ -353,7 +364,7 @@ export class MockDataSource implements MarketDataSource {
   }
 
   private tickBooks() {
-    for (const m of MARKETS) {
+    for (const m of UNIVERSE) {
       const st = this.state.get(m.id)!;
       // drift the mid (mean-reverting random walk)
       const drift = (this.rng() - 0.5) * 2 * m.vol * st.mid;
@@ -408,7 +419,7 @@ export class MockDataSource implements MarketDataSource {
 
   // ── trade stream ────────────────────────────────────────────────────────────
   private tickTrades() {
-    for (const m of MARKETS) {
+    for (const m of UNIVERSE) {
       if (!this.tradeSubs.get(m.id)?.size) continue;
       const burst = 1 + Math.floor(this.rng() * 2);
       for (let i = 0; i < burst; i++) {
@@ -440,7 +451,7 @@ export class MockDataSource implements MarketDataSource {
 
   // ── ticker ────────────────────────────────────────────────────────────────
   private tickTickers() {
-    for (const m of MARKETS) {
+    for (const m of UNIVERSE) {
       if (!this.tickerSubs.get(m.id)?.size) continue;
       this.emitTicker(m.id);
     }

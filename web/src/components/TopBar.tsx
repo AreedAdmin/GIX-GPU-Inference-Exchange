@@ -3,10 +3,15 @@ import { useActiveMarket, useGix } from "../store";
 import { fmtCompact, fmtPct, fmtPrice, fmtUsdc } from "../lib/format";
 import { ConnectionDot } from "./ConnectionDot";
 import { WalletBar } from "./WalletBar";
+import { CRYPTO_PAIRS } from "../data/cryptoPairs";
 
 export function TopBar() {
   const { markets, activeMarketId, setActiveMarket, ticker, status } = useGix();
   const market = useActiveMarket();
+  // Crypto pairs aren't in markets() (GPU-only); resolve their label for the header.
+  const cryptoPair = CRYPTO_PAIRS.find((p) => p.id === activeMarketId);
+  const displayName = market?.name ?? (cryptoPair ? `${cryptoPair.base} / ${cryptoPair.quote}` : "—");
+  const unitLabel = cryptoPair ? `${cryptoPair.quote}/${cryptoPair.base}` : "SCU/USDC";
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -54,9 +59,9 @@ export function TopBar() {
           className="group focus-amber flex items-center gap-2 rounded-md border border-border-glass bg-elev/60 px-3 py-1.5 text-left transition hover:border-accent/40 hover:bg-accent/[0.04]"
         >
           <span className="num text-[13px] font-medium text-primary">
-            {market?.name ?? "—"}
+            {displayName}
           </span>
-          <span className="label-micro text-accent">SCU/USDC</span>
+          <span className="label-micro text-accent">{unitLabel}</span>
           <svg
             width="11"
             height="11"

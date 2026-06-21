@@ -16,7 +16,6 @@ export function MarketsSidebar() {
   // (drive the trading view); Crypto = currency→dollar exchange routes (drive the
   // on-ramp swap below). Switching here only changes the list, never the trade panel.
   const [category, setCategory] = useState<Category>("gpu");
-  const [selectedPair, setSelectedPair] = useState<string>(CRYPTO_PAIRS[0]?.id ?? "");
 
   const count = category === "gpu" ? markets.length : CRYPTO_PAIRS.length;
 
@@ -89,8 +88,8 @@ export function MarketsSidebar() {
                 seed={p.id}
                 last={p.last}
                 change={p.change24h}
-                active={p.id === selectedPair}
-                onClick={() => setSelectedPair(p.id)}
+                active={p.id === activeMarketId}
+                onClick={() => setActiveMarket(p.id)}
               />
             ))}
       </div>
