@@ -23,9 +23,17 @@ export interface HttpDeps {
   ollamaOk: () => boolean;
 }
 
+// The web app runs on a different origin (e.g. :5179) than the node (:8082), so the
+// browser needs CORS to read /result. Permissive is fine — the result is public + hash-verified.
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "content-type",
+} as const;
+
 function send(res: ServerResponse, status: number, body: unknown): void {
   const json = JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json" });
+  res.writeHead(status, { "content-type": "application/json", ...CORS_HEADERS });
   res.end(json);
 }
 
@@ -49,6 +57,13 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: HttpDeps)
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
   const method = req.method ?? "GET";
+
+  // CORS preflight (browser cross-origin from the web app on a different port)
+  if (method === "OPTIONS") {
+    res.writeHead(204, CORS_HEADERS);
+    res.end();
+    return;
+  }
 
   // GET /health
   if (method === "GET" && path === "/health") {
