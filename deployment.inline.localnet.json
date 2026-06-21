@@ -1,0 +1,33 @@
+{
+  "network": "localnet",
+  "packageId": "0x311dcf5e1fbc1a94791953896c682c3b0b5962b31d9ce768671b8f618a89c9bc",
+  "configId": "0xeaaa5b5fb3a76f34258020556978ea211a533b9a161d2426669c674a8ec8fd47",
+  "adminCapId": "0xba8ca2c39c35058613db737c505172462f199a29049caefce7d57693f2851970",
+  "allowlistId": "0xaf821f4637575523857d2faebfb833215af8420c37056a20adcf7e5051ba55c3",
+  "treasuryId": "0xfca95bc308f0964d96126236f02a81938a6a305d8280fcfecc9a7286d61d6b64",
+  "faucetId": "0x8c7550b3bba35a462e12dedb0d3d5c8d9f095d97898d694fa8d17f7312b0fd8d",
+  "usdcType": "0x311dcf5e1fbc1a94791953896c682c3b0b5962b31d9ce768671b8f618a89c9bc::mock_usdc::MOCK_USDC",
+  "clockId": "0x6",
+  "mockMeasurement": "MOCK-tdx-llama8b-v1",
+  "modelRecordId": "0x4285103152311e36e78134705a72276153b561ef737612682fd8a41aad6147de",
+  "markets": [
+    {
+      "id": "0x4bc682773b2a70428107c49f220857e585d1792be46dba76127c73ce274626c3",
+      "name": "GB10-qwen3.6-35b",
+      "creditType": "0x311dcf5e1fbc1a94791953896c682c3b0b5962b31d9ce768671b8f618a89c9bc::markets::M_GB10_QWEN35B",
+      "creditCoinType": "0x311dcf5e1fbc1a94791953896c682c3b0b5962b31d9ce768671b8f618a89c9bc::credit::Credit<0x311dcf5e1fbc1a94791953896c682c3b0b5962b31d9ce768671b8f618a89c9bc::markets::M_GB10_QWEN35B>",
+      "modelId": "0x4285103152311e36e78134705a72276153b561ef737612682fd8a41aad6147de",
+      "scuTokens": 1000,
+      "slaP99Ms": 30000
+    }
+  ],
+  "accounts": {
+    "admin": "0xb66e113e3ef2cb04fd8d4dc1b6c96d80431f44cd703e13c0f0151cb3824ab731",
+    "providers": [
+      "0xb66e113e3ef2cb04fd8d4dc1b6c96d80431f44cd703e13c0f0151cb3824ab731"
+    ],
+    "consumers": [
+      "0xb66e113e3ef2cb04fd8d4dc1b6c96d80431f44cd703e13c0f0151cb3824ab731"
+    ]
+  }
+}
