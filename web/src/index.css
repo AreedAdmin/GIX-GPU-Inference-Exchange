@@ -371,3 +371,30 @@
     scrollbar-width: none;
   }
 }
+
+/* Typewriter / streaming-reveal caret (RevealText). Pure display affordance — the amber
+   accent blink that trails the progressively-revealed verified output. */
+@keyframes reveal-caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  95% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+.reveal-caret {
+  animation: reveal-caret-blink 1s steps(1, end) infinite;
+}
+/* Honor reduced-motion at the CSS layer too: no blink (the hook already shows text
+   instantly, so the caret won't render — this is belt-and-suspenders). */
+@media (prefers-reduced-motion: reduce) {
+  .reveal-caret {
+    animation: none;
+    opacity: 0;
+  }
+}

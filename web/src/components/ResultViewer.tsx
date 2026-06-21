@@ -7,6 +7,7 @@
 import { useGix } from "../store";
 import { shortId } from "../lib/config";
 import { fmtUsdc } from "../lib/format";
+import { RevealText } from "./RevealText";
 
 export function ResultViewer() {
   const {
@@ -102,9 +103,13 @@ export function ResultViewer() {
               {/* model output */}
               <div className="mb-4">
                 <span className="label-micro">Model Output · {r.model}</span>
-                <pre className="glass mt-1.5 max-h-[34vh] overflow-auto whitespace-pre-wrap rounded-md p-3 text-[12.5px] leading-relaxed text-primary">
-                  {r.output}
-                </pre>
+                {/* Typewriter reveal of the already-verified output. Keyed by jobId so it
+                    animates once per result and never replays on badge/status re-renders. */}
+                <RevealText
+                  text={r.output}
+                  revealKey={jobId}
+                  className="glass mt-1.5 max-h-[34vh] overflow-auto whitespace-pre-wrap rounded-md p-3 text-[12.5px] leading-relaxed text-primary"
+                />
               </div>
 
               {/* facts grid */}
