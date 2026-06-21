@@ -154,6 +154,7 @@ describe("serveJob — M2 fill branch", () => {
     let submitArgs: Record<string, unknown> | undefined;
     let settleArgs: { verdict: number | undefined; isFill: boolean } | undefined;
     const chain = {
+      ackJob: vi.fn(async () => {}),
       getJobMeta: vi.fn(async () => ({ isFill: true, inputBlobId })),
       submitSignedAttestation: vi.fn(async (a: Record<string, unknown>) => {
         submitArgs = a;
@@ -217,6 +218,7 @@ describe("serveJob — M2 fill branch", () => {
 
     let settleArgs: { verdict: number | undefined; isFill: boolean } | undefined;
     const chain = {
+      ackJob: vi.fn(async () => {}),
       getJobMeta: vi.fn(async () => ({ isFill: false, inputBlobId: 0n })),
       submitSignedAttestation: vi.fn(async () => ({ digest: "0xsubmit", verdict: 0 })),
       settleJob: vi.fn(async (_j: string, verdict: number | undefined, isFill: boolean) => {

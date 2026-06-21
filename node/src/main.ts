@@ -39,12 +39,17 @@ async function main(): Promise<void> {
   log(`[node] network=${cfg.deployment.network} pkg=${cfg.deployment.packageId}`);
   log(`[node] model=${cfg.model} gpu=${cfg.gpuClass} market=${cfg.marketId}`);
   log(`[node] ollama=${cfg.ollamaUrl} rpc=${cfg.rpcUrl} chainEnabled=${cfg.chainEnabled}`);
+  log(
+    cfg.maxTokens > 0
+      ? `[node] max output tokens = ${cfg.maxTokens}`
+      : `[node] max output tokens = uncapped`,
+  );
 
   // 1. Keys.
   const keys = loadKeys(cfg.keysDir, log);
 
   // 2. Ollama — probe + ensure model.
-  const ollama = new OllamaClient(cfg.ollamaUrl, cfg.model);
+  const ollama = new OllamaClient(cfg.ollamaUrl, cfg.model, cfg.maxTokens);
   let ollamaOk = false;
   try {
     await ollama.listModels(); // reachability probe

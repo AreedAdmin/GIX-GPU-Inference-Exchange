@@ -20,8 +20,11 @@ async function main(): Promise<void> {
     process.env.GIX_PROMPT ??
     "In one short sentence, what is a GPU inference exchange?";
 
-  const ollama = new OllamaClient(baseUrl, model);
-  console.log(`[ollama-check] ${baseUrl} model=${model}`);
+  const maxTokensRaw = process.env.GIX_MAX_TOKENS;
+  const maxTokens =
+    maxTokensRaw === undefined || maxTokensRaw === "" ? 1000 : Number(maxTokensRaw);
+  const ollama = new OllamaClient(baseUrl, model, maxTokens);
+  console.log(`[ollama-check] ${baseUrl} model=${model} maxTokens=${maxTokens}`);
   const pulled = await ollama.ensureModel((s) => process.stderr.write(`\r[pull] ${s}        `));
   if (pulled) process.stderr.write("\n");
   console.log(`[ollama-check] model present; running inference...`);

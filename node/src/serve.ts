@@ -138,6 +138,21 @@ export async function serveJob(
     return null;
   }
 
+  // 1b. Ack FIRST (Dispatched → Executing), in its own tx, BEFORE inference. The job's
+  //     ack_deadline is a fixed ~30 s window from job creation; inference can take far
+  //     longer (a real qwen run took ~75 s). Acking up front lands well inside the 30 s
+  //     window, then inference fits the generous 180 s exec window. The ack inside the
+  //     later attestation PTB then becomes a harmless no-op (job already EXECUTING).
+  //     Tolerant: on failure we log and proceed — ackJob swallows benign aborts, and the
+  //     attest PTB still attempts the ack.
+  if (deps.chain) {
+    try {
+      await deps.chain.ackJob(job.jobId);
+    } catch (e) {
+      log(`[serve] job ${job.jobId}: ackJob failed (${(e as Error).message}); proceeding to inference`);
+    }
+  }
+
   // 2. Real inference on the GB10.
   log(`[serve] job ${job.jobId}: running ${model} inference (${prompt.length} prompt chars)`);
   const gen = await ollama.generate(prompt);

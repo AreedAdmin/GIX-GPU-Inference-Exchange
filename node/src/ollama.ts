@@ -26,9 +26,15 @@ export interface OllamaGenerateResult {
 export class OllamaError extends Error {}
 
 export class OllamaClient {
+  /**
+   * @param maxTokens generation cap sent to Ollama as `num_predict`. When > 0 the
+   *   `options.num_predict` field is included so the model stops early (bounds
+   *   latency / keeps inside the SLA). <= 0 means "uncapped" — the field is omitted.
+   */
   constructor(
     private readonly baseUrl: string,
     private readonly model: string,
+    private readonly maxTokens = 0,
   ) {}
 
   /** GET /api/tags — also our reachability probe. Throws OllamaError if unreachable. */
@@ -99,12 +105,19 @@ export class OllamaClient {
    */
   async generate(prompt: string): Promise<OllamaGenerateResult> {
     const tStart = Date.now();
+    // Bound the generation length via Ollama's `num_predict` option so qwen answers
+    // stay short (faster inference, comfortably inside the SLA). Only sent when a
+    // positive cap is configured; <= 0 leaves Ollama uncapped (its own default).
+    const options = this.maxTokens > 0 ? { num_predict: this.maxTokens } : undefined;
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/api/generate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model: this.model, prompt, stream: false }),
+        // think:false disables qwen3.x's hidden reasoning phase, so `.response` is the
+        // direct answer. (With thinking on, a num_predict cap is spent "thinking" and
+        // `.response` comes back empty — the reasoning-model gotcha.)
+        body: JSON.stringify({ model: this.model, prompt, stream: false, think: false, options }),
       });
     } catch (e) {
       throw new OllamaError(

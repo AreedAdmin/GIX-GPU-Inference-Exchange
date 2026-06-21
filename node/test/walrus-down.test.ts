@@ -35,6 +35,7 @@ function fakeChain(inputBlobId: bigint) {
   return {
     submitCount: 0,
     settleCount: 0,
+    ackJob: vi.fn(async () => {}),
     getJobMeta: vi.fn(async () => ({ isFill: false, inputBlobId })),
     submitSignedAttestation: vi.fn(async function (this: ReturnType<typeof fakeChain>) {
       this.submitCount++;

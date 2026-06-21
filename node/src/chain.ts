@@ -457,6 +457,49 @@ export class NodeChain {
     };
   }
 
+  // ---- ack (Dispatched → Executing), standalone --------------------------
+
+  /**
+   * Ack the job in its OWN tx, BEFORE running inference.
+   *
+   *   ack<M, Q>(job, clk, ctx)   [type args: creditType, usdcType]
+   *
+   * WHY STANDALONE: the job's `ack_deadline` is a FIXED ~30 s window from job
+   * creation (DEFAULT_ACK_MS), while `exec_deadline` (sla×6 ≈ 180 s) and
+   * `attest_deadline` (≈ 210 s) are generous. If we instead acked together with
+   * the attestation PTB (the historical "ack then submit in one PTB" path), a slow
+   * answer (a real qwen run took ~75 s) lands the ack at ~75 s > 30 s and the
+   * contract aborts with EAttestDeadline(500) in job::ack — the whole settle fails.
+   * Acking first lands the ack within ~5–10 s (well inside 30 s); inference then
+   * uses the full 180 s exec window, and the ack still inside the attest PTB
+   * becomes a harmless no-op (job already EXECUTING — ack is idempotent).
+   *
+   * IDEMPOTENT / TOLERANT: `job::ack` is `assert state==DISPATCHED||EXECUTING; if
+   * EXECUTING return;`. A redundant ack (e.g. a node restart re-serving the same
+   * job that is already EXECUTING) is a no-op on-chain. We additionally swallow the
+   * failure here and just log — the job may already be acked, and the attest PTB
+   * will still attempt the ack — so a transient ack failure never wedges serving.
+   */
+  async ackJob(jobId: string): Promise<void> {
+    await this.connect();
+    try {
+      const tx = new this.Transaction();
+      tx.moveCall({
+        target: `${this.pkg}::job::ack`,
+        typeArguments: [this.market.creditType, this.usdcType],
+        arguments: [tx.object(jobId), tx.object(this.clockId)],
+      });
+      const res = await this.exec(tx);
+      this.assertOk(res, "ack");
+      this.log(`[chain] acked job ${jobId} (digest ${res.digest})`);
+    } catch (e) {
+      // Tolerant: the job may already be EXECUTING (idempotent ack), or already past
+      // a benign state. Log and return — don't throw. The attest PTB's own ack call
+      // is a no-op when already EXECUTING, so settlement is unaffected.
+      this.log(`[chain] ackJob(${jobId}) non-fatal: ${(e as Error).message} (continuing)`);
+    }
+  }
+
   // ---- attestation submission --------------------------------------------
 
   /**

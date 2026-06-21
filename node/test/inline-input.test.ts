@@ -70,6 +70,7 @@ describe("serveJob — Option 3 inline on-chain input", () => {
     // Inline input present; ALSO advertise a Walrus blob id + a different cached prompt to prove
     // neither is consulted when inline input is present.
     const chain = {
+      ackJob: vi.fn(async () => {}),
       getJobMeta: vi.fn(async () => ({ isFill: false, inputBlobId: 999n, input })),
       submitSignedAttestation: vi.fn(async () => ({ digest: "0xsubmit", verdict: 0 })),
       settleJob: vi.fn(async () => ({ digest: "0xsettle", fn: "settle" })),
@@ -117,6 +118,7 @@ describe("serveJob — Option 3 inline on-chain input", () => {
     let submitCount = 0;
     let settleCount = 0;
     const chain = {
+      ackJob: vi.fn(async () => {}),
       getJobMeta: vi.fn(async () => ({ isFill: false, inputBlobId: 0n, input: tampered })),
       submitSignedAttestation: vi.fn(async () => {
         submitCount++;
@@ -149,6 +151,7 @@ describe("serveJob — Option 3 inline on-chain input", () => {
   it("priority 2: empty inline input + inputBlobId != 0 → reads from Walrus", async () => {
     const job = jobFor(PROMPT, "c3");
     const chain = {
+      ackJob: vi.fn(async () => {}),
       getJobMeta: vi.fn(async () => ({
         isFill: false,
         inputBlobId: 555n,
@@ -185,6 +188,7 @@ describe("serveJob — Option 3 inline on-chain input", () => {
   it("priority 3: empty inline input + inputBlobId 0 → /inputs cache fallback", async () => {
     const job = jobFor(PROMPT, "d4");
     const chain = {
+      ackJob: vi.fn(async () => {}),
       getJobMeta: vi.fn(async () => ({ isFill: false, inputBlobId: 0n, input: new Uint8Array(0) })),
       submitSignedAttestation: vi.fn(async () => ({ digest: "0xsubmit", verdict: 0 })),
       settleJob: vi.fn(async () => ({ digest: "0xsettle", fn: "settle" })),

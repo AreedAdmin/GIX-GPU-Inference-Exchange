@@ -65,6 +65,12 @@ export interface NodeConfig {
   ollamaUrl: string;
   /** Model tag served, default llama3.1:8b. */
   model: string;
+  /**
+   * Generation token cap passed to Ollama as `num_predict` in /api/generate options.
+   * Bounds qwen output so inference stays fast and comfortably inside the SLA.
+   * Sourced from GIX_MAX_TOKENS; default 1000. (Empty/unset → default.)
+   */
+  maxTokens: number;
   /** GPU class advertised on registration, default GB10. */
   gpuClass: string;
   /** Public HTTP endpoint advertised on-chain (where consumers POST /inputs). */
@@ -237,6 +243,7 @@ export function loadConfig(): NodeConfig {
     rpcUrl: env("GIX_RPC_URL", defaultRpc),
     ollamaUrl: env("GIX_OLLAMA_URL", "http://127.0.0.1:11434"),
     model: env("GIX_MODEL", "llama3.1:8b"),
+    maxTokens: envInt("GIX_MAX_TOKENS", 1000),
     gpuClass: env("GIX_GPU_CLASS", "GB10"),
     // The endpoint recorded ON-CHAIN and written to node-state.json. A remote consumer must
     // be able to resolve this, so the bind host 0.0.0.0 is NOT a usable default — fall back
