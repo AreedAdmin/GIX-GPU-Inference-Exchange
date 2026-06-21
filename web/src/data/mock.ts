@@ -18,8 +18,14 @@ import type {
   Trade,
   Unsub,
 } from "./types";
+import { loadChainConfig } from "../trade/config";
 
 type Cb<T> = (v: T) => void;
+
+// The live, on-chain buyable market (VITE_MARKET_ID). The mock list's PRIMARY entry uses
+// these ids so the default-selected market matches the deployment — otherwise every buy
+// hits "only the live deployment market can be bought (others are simulated)".
+const CHAIN_MARKET = loadChainConfig().market;
 
 // ── Market universe ─────────────────────────────────────────────────────────
 // Primary market is the live deployment market; the others are plausible sibling
@@ -58,12 +64,12 @@ const MARKETS: SimMarket[] = [
   // Live demo market — the GB10 (DGX Spark) provider serving qwen3.6:35b.
   // Headline market; its Credit/USDC DeepBook pool is created once test DEEP lands.
   mkMarket(
-    "mkt-gb10-qwen3-35b",
-    "GB10-qwen3.6-35b",
+    CHAIN_MARKET.id,                    // live on-chain market id (VITE_MARKET_ID) — buyable
+    CHAIN_MARKET.name,                  // its display name
     0.0042,
     0.0011,
-    1000,
-    30000,
+    CHAIN_MARKET.scuTokens ?? 1000,
+    CHAIN_MARKET.slaP99Ms ?? 30000,
   ),
   mkMarket(
     "0x816c8da0ce624cb62e84948bad3fe1fad60a8aa945d85661b29bcd73dffc55b1",
