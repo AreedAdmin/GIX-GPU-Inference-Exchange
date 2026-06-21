@@ -187,9 +187,12 @@ export class NodeChain {
       });
     }
 
-    // 3. stake(cap, cfg, bond, capacity_scu, ctx) -> ProviderStake
+    // 3. stake<Q>(cap, cfg, bond, capacity_scu, ctx) -> ProviderStake<Q>
+    //    The deployed package generalises the quote coin to a phantom Q (= MOCK_USDC); pass
+    //    it as the sole type arg or the VM aborts with VMVerificationOrDeserializationError.
     const stake = tx.moveCall({
       target: `${this.pkg}::staking::stake`,
+      typeArguments: [this.usdcType],
       arguments: [
         providerCap,
         tx.object(this.cfgId),
@@ -207,7 +210,7 @@ export class NodeChain {
     if (this.cfg.mintScu > 0) {
       const credit = tx.moveCall({
         target: `${this.pkg}::staking::mint_credits`,
-        typeArguments: [this.market.creditType],
+        typeArguments: [this.market.creditType, this.usdcType],
         arguments: [
           providerCap,
           stake,
@@ -255,7 +258,7 @@ export class NodeChain {
     const tx = new this.Transaction();
     tx.moveCall({
       target: `${this.pkg}::staking::post_ask`,
-      typeArguments: [this.market.creditType],
+      typeArguments: [this.market.creditType, this.usdcType],
       arguments: [
         tx.object(this.providerCapId),
         tx.object(this.stakeId),
@@ -333,7 +336,7 @@ export class NodeChain {
     const tx = new this.Transaction();
     const credit = tx.moveCall({
       target: `${this.pkg}::staking::mint_credits`,
-      typeArguments: [this.market.creditType],
+      typeArguments: [this.market.creditType, this.usdcType],
       arguments: [
         tx.object(this.providerCapId),
         tx.object(this.stakeId),
@@ -473,7 +476,7 @@ export class NodeChain {
 
     tx.moveCall({
       target: `${this.pkg}::job::ack`,
-      typeArguments: [this.market.creditType],
+      typeArguments: [this.market.creditType, this.usdcType],
       arguments: [tx.object(a.jobId), tx.object(this.clockId)],
     });
 
@@ -510,7 +513,7 @@ export class NodeChain {
       sigArgs.push(tx.object(this.clockId));
       tx.moveCall({
         target: `${this.pkg}::attestation::submit_signed_attestation`,
-        typeArguments: [this.market.creditType],
+        typeArguments: [this.market.creditType, this.usdcType],
         arguments: sigArgs,
       });
     } else {
@@ -518,7 +521,7 @@ export class NodeChain {
       // provider_rec). Proves the localnet serve loop end-to-end against the M1 deploy.
       tx.moveCall({
         target: `${this.pkg}::attestation::submit_mock_attestation`,
-        typeArguments: [this.market.creditType],
+        typeArguments: [this.market.creditType, this.usdcType],
         arguments: [
           tx.object(a.jobId),
           tx.object(this.cfgId),
@@ -591,7 +594,7 @@ export class NodeChain {
       if (!ok) args.push(tx.object(this.treasuryId()));
       tx.moveCall({
         target: `${this.pkg}::settlement::${fn}`,
-        typeArguments: [this.market.creditType],
+        typeArguments: [this.market.creditType, this.usdcType],
         arguments: args,
       });
     } else {
@@ -599,7 +602,7 @@ export class NodeChain {
       fn = ok ? "settle" : "resolve_attested";
       tx.moveCall({
         target: `${this.pkg}::settlement::${fn}`,
-        typeArguments: [this.market.creditType],
+        typeArguments: [this.market.creditType, this.usdcType],
         arguments: [
           tx.object(jobId),
           tx.object(this.market.id),
