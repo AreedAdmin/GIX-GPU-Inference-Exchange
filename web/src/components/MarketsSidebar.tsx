@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useGix } from "../store";
 import { fmtPct, fmtPrice } from "../lib/format";
-import { OnRampWidget } from "./OnRampWidget";
 import { CRYPTO_PAIRS } from "../data/cryptoPairs";
 
 type Category = "gpu" | "crypto";
@@ -99,17 +98,10 @@ export function MarketsSidebar() {
       {category === "crypto" && (
         <div className="shrink-0 border-t border-border-glass px-3 py-1.5">
           <span className="label-micro normal-case tracking-normal text-muted">
-            Exchange any token into USDC · DBUSDC · MOCK_USDC. Swap below.
+            Reference rates into USDC · DBUSDC · MOCK_USDC.
           </span>
         </div>
       )}
-
-      {/* SUI → USDC on-ramp — a small funding utility beside the markets. It is
-          self-contained (own glass surface) and degrades gracefully when the
-          wallet is disconnected or off testnet, so it never disturbs the list. */}
-      <div className="shrink-0 border-t border-border-glass p-2">
-        <OnRampWidget />
-      </div>
     </div>
   );
 }
