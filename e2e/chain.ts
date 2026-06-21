@@ -62,6 +62,17 @@ export class E2eChain {
   private connected = false;
   /** signed-attestation param count detected from the package ABI (15=M1, 17=M2). */
   private signedAttestParams?: number;
+  /** create_job_from_ask param count detected from the package ABI (8=pre-inline, 9=inline Option 3). */
+  private createJobFromAskParams?: number;
+  /**
+   * Whether the deployed package parameterises the quote coin `Q` as a generic across the
+   * staking/job/settlement/attestation ABIs (detected from `staking::stake`'s type-parameter
+   * count): newer deploys are `stake<Q>` / `post_ask<M,Q>` / `Job<M,Q>` / `settle<M,Q>` etc.,
+   * whereas older deploys hardcoded the quote coin (`stake` with no type params, `post_ask<M>`).
+   * When true the harness appends `usdcType` (the Q) to each generic call's type arguments;
+   * when false it drives the single-`M` shape. This keeps ONE harness driving both deploys.
+   */
+  private quoteGeneric?: boolean;
 
   readonly pkg: string;
   readonly cfgId: string;
@@ -159,7 +170,7 @@ export class E2eChain {
     };
   }
 
-  /** Read a Job's state + escrow value + slashed flag + hashes + blob ids + attestation. */
+  /** Read a Job's state + escrow value + slashed flag + hashes + blob ids + inline input + attestation. */
   async jobView(jobId: string): Promise<{
     state: number;
     escrow: bigint;
@@ -168,6 +179,9 @@ export class E2eChain {
     outputHash: string;
     inputBlobId: bigint;
     outputBlobId: bigint;
+    /** The on-chain inline `job.input` bytes (Option 3). Empty when the Walrus-blob path is used
+     * OR the deployed package predates the inline ABI (no `input` field). */
+    input: Uint8Array;
     isFill: boolean;
     verdict?: number;
   }> {
@@ -186,6 +200,7 @@ export class E2eChain {
       outputHash: hexOfVec(f?.output_hash),
       inputBlobId: bigOf(f?.input_blob_id),
       outputBlobId: bigOf(f?.output_blob_id),
+      input: bytesOfVec(f?.input),
       isFill: boolOf(f?.is_fill),
       verdict: attRec ? Number(attRec.verdict ?? 0) : undefined,
     };
@@ -227,6 +242,8 @@ export class E2eChain {
     });
     const stake = tx.moveCall({
       target: `${this.pkg}::staking::stake`,
+      // stake<Q>: append the quote coin (Q=MOCK_USDC) on the generic-Q ABI; omit on the older ABI.
+      typeArguments: (await this.detectQuoteGeneric()) ? [this.usdcType] : [],
       arguments: [cap, tx.object(this.cfgId), minted, tx.pure.u64(BigInt(args.capacityScu))],
     });
     tx.transferObjects([cap, stake], tx.pure.address(provider.address));
@@ -267,7 +284,7 @@ export class E2eChain {
     const tx = new this.Transaction();
     tx.moveCall({
       target: `${this.pkg}::staking::post_ask`,
-      typeArguments: [this.market.creditType],
+      typeArguments: await this.typeArgsMQ(),
       arguments: [
         tx.object(ids.capId),
         tx.object(ids.stakeId),
@@ -310,28 +327,101 @@ export class E2eChain {
   }
 
   /**
-   * create_job_from_ask<M>(cfg, &market, &mut ask, qty, escrow_in, input_hash, clk) → Job.
-   * Splits the exact escrow coin out of the consumer's MOCK_USDC inside the PTB.
+   * Detect the create_job_from_ask ABI arity once. Two shapes exist across deploys:
+   *   - pre-inline (8 params): (cfg, market, ask, qty, escrow_in, input_hash, clk, ctx)
+   *   - inline / Option 3 (9 params): (cfg, market, ask, qty, escrow_in, INPUT, input_hash, clk, ctx)
+   * The inline ABI carries the raw prompt bytes on-chain so the tunnel-free path needs no `/inputs`
+   * HTTP and no Walrus input blob (input_blob_id is fixed to 0 internally on this path).
+   */
+  private async detectCreateJobFromAskParams(): Promise<number> {
+    if (this.createJobFromAskParams !== undefined) return this.createJobFromAskParams;
+    const fn = await this.client.getNormalizedMoveFunction({
+      package: this.pkg,
+      module: "job",
+      function: "create_job_from_ask",
+    });
+    this.createJobFromAskParams = fn.parameters.length;
+    this.log(
+      `[chain] create_job_from_ask ABI: ${this.createJobFromAskParams} params ` +
+        `(${this.createJobFromAskParams >= 9 ? "inline/Option3" : "pre-inline"})`,
+    );
+    return this.createJobFromAskParams;
+  }
+
+  /** Whether the located package exposes the inline-input (Option 3) create_job_from_ask ABI. */
+  async supportsInlineInput(): Promise<boolean> {
+    await this.connect();
+    return (await this.detectCreateJobFromAskParams()) >= 9;
+  }
+
+  /**
+   * Detect once whether the package parameterises the quote coin `Q` (newer `stake<Q>` ABI) or
+   * hardcodes it (older `stake` with no type params). Signalled by `staking::stake`'s type-param
+   * count: 1 ⇒ generic-Q, 0 ⇒ hardcoded.
+   */
+  private async detectQuoteGeneric(): Promise<boolean> {
+    if (this.quoteGeneric !== undefined) return this.quoteGeneric;
+    const fn = await this.client.getNormalizedMoveFunction({
+      package: this.pkg,
+      module: "staking",
+      function: "stake",
+    });
+    this.quoteGeneric = fn.typeParameters.length >= 1;
+    this.log(
+      `[chain] quote-coin ABI: ${this.quoteGeneric ? "generic Q (stake<Q>, *<M,Q>)" : "hardcoded Q (stake, *<M>)"}`,
+    );
+    return this.quoteGeneric;
+  }
+
+  /**
+   * Type arguments for a generic `<M, Q>` market call. On the generic-Q ABI this is
+   * `[creditType, usdcType]`; on the older hardcoded-Q ABI it is `[creditType]` (single `M`).
+   * Detected from the deployed package so one harness drives both deploys.
+   */
+  private async typeArgsMQ(): Promise<string[]> {
+    return (await this.detectQuoteGeneric()) ? [this.market.creditType, this.usdcType] : [this.market.creditType];
+  }
+
+  /**
+   * create_job_from_ask<M>(cfg, &market, &mut ask, qty, escrow_in, [input,] input_hash, clk) → Job.
+   * Splits the exact escrow coin out of the consumer's MOCK_USDC inside the PTB. Adapts to the
+   * detected ABI: when the inline ABI is present, `input` (raw prompt bytes) is passed immediately
+   * before `input_hash` (and the contract pins `input_blob_id = 0` internally); when absent, the
+   * pre-inline shape is used so existing localnet deploys keep working.
+   *
+   * Pass `input` to drive the tunnel-free inline path; omit it for the legacy Walrus/`/inputs` path.
    */
   async createJobFromAsk(
     consumer: Actor,
-    args: { askId: string; qtyScu: number; escrowUsdc: number; inputHashHex: string },
+    args: { askId: string; qtyScu: number; escrowUsdc: number; inputHashHex: string; input?: Uint8Array },
   ): Promise<{ jobId: string }> {
     await this.connect();
+    const inline = (await this.detectCreateJobFromAskParams()) >= 9;
+    if (args.input && !inline) {
+      throw new Error(
+        "createJobFromAsk: inline input requested but the located package predates the inline ABI " +
+          "(create_job_from_ask has no `input` param). Redeploy the inline-input contracts (Option 3) first.",
+      );
+    }
     const tx = new this.Transaction();
     const escrowCoin = await this.splitExactUsdc(tx, consumer.address, BigInt(args.escrowUsdc));
+    const moveArgs: unknown[] = [
+      tx.object(this.cfgId),
+      tx.object(this.market.id),
+      tx.object(args.askId),
+      tx.pure.u64(BigInt(args.qtyScu)),
+      escrowCoin,
+    ];
+    if (inline) {
+      // input_blob_id is fixed to 0 by the contract on the inline path (§A): the prompt rides in `input`.
+      moveArgs.push(tx.pure.vector("u8", Array.from(args.input ?? new Uint8Array())));
+    }
+    moveArgs.push(tx.pure.vector("u8", Array.from(hexToBytes(args.inputHashHex))));
+    moveArgs.push(tx.object(this.clockId));
     tx.moveCall({
       target: `${this.pkg}::job::create_job_from_ask`,
-      typeArguments: [this.market.creditType],
-      arguments: [
-        tx.object(this.cfgId),
-        tx.object(this.market.id),
-        tx.object(args.askId),
-        tx.pure.u64(BigInt(args.qtyScu)),
-        escrowCoin,
-        tx.pure.vector("u8", Array.from(hexToBytes(args.inputHashHex))),
-        tx.object(this.clockId),
-      ],
+      typeArguments: await this.typeArgsMQ(),
+      arguments: moveArgs as never[],
     });
     const res = await this.exec(tx, consumer.keypair);
     this.assertOk(res, "create_job_from_ask");
@@ -356,7 +446,7 @@ export class E2eChain {
     const tx = new this.Transaction();
     tx.moveCall({
       target: `${this.pkg}::job::ack`,
-      typeArguments: [this.market.creditType],
+      typeArguments: await this.typeArgsMQ(),
       arguments: [tx.object(jobId), tx.object(this.clockId)],
     });
     const res = await this.exec(tx, provider.keypair);
@@ -424,7 +514,7 @@ export class E2eChain {
     sigArgs.push(tx.object(this.clockId));
     tx.moveCall({
       target: `${this.pkg}::attestation::submit_signed_attestation`,
-      typeArguments: [this.market.creditType],
+      typeArguments: await this.typeArgsMQ(),
       arguments: sigArgs as never[],
     });
     const res = await this.exec(tx, provider.keypair);
@@ -446,7 +536,7 @@ export class E2eChain {
     const tx = new this.Transaction();
     tx.moveCall({
       target: `${this.pkg}::settlement::${fn}`,
-      typeArguments: [this.market.creditType],
+      typeArguments: await this.typeArgsMQ(),
       arguments: [
         tx.object(jobId),
         tx.object(this.market.id),
@@ -466,7 +556,7 @@ export class E2eChain {
     const tx = new this.Transaction();
     tx.moveCall({
       target: `${this.pkg}::settlement::expire_and_resolve`,
-      typeArguments: [this.market.creditType],
+      typeArguments: await this.typeArgsMQ(),
       arguments: [
         tx.object(jobId),
         tx.object(this.market.id),
@@ -557,6 +647,24 @@ function hexOfVec(v: unknown): string {
   if (Array.isArray(v)) return v.map((b) => Number(b).toString(16).padStart(2, "0")).join("");
   if (typeof v === "string") return v.startsWith("0x") ? v.slice(2) : v;
   return "";
+}
+/** Read a Move `vector<u8>` as rendered by the JSON-RPC: a `number[]`, a base64/hex string, or
+ * absent (older package with no such field) → empty bytes. Used for the inline `job.input`. */
+function bytesOfVec(v: unknown): Uint8Array {
+  if (v === null || v === undefined) return new Uint8Array();
+  if (Array.isArray(v)) return Uint8Array.from(v.map((b) => Number(b) & 0xff));
+  if (v instanceof Uint8Array) return v;
+  if (typeof v === "string") {
+    const s = v.startsWith("0x") || v.startsWith("0X") ? v.slice(2) : v;
+    // Hex if it's an even-length all-hex string; otherwise treat as base64 (sui-json default).
+    if (s.length % 2 === 0 && /^[0-9a-fA-F]*$/.test(s)) {
+      const out = new Uint8Array(s.length / 2);
+      for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
+      return out;
+    }
+    return Uint8Array.from(Buffer.from(v, "base64"));
+  }
+  return new Uint8Array();
 }
 /**
  * Read Option<Escrow<Q>> → the locked balance value (0n when none/empty).

@@ -14,6 +14,7 @@
     "e2e:local": "tsx harness.ts --net=localnet --node=mock --scenario=happy",
     "e2e:local:negatives": "tsx harness.ts --net=localnet --node=mock --scenario=negatives",
     "e2e:local:load": "tsx harness.ts --net=localnet --node=mock --scenario=load",
+    "e2e:local:inline": "tsx harness.ts --net=localnet --node=mock --scenario=inline",
     "e2e:local:all": "tsx harness.ts --net=localnet --node=mock --scenario=all",
     "e2e:testnet": "tsx harness.ts --net=testnet --node=gb10 --scenario=happy",
     "test": "vitest run",

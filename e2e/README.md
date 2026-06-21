@@ -37,7 +37,10 @@ npm install
 npm run e2e:local            # happy path  (≈17s, 22 invariant/audit checks)
 npm run e2e:local:negatives  # every fault → its expected refund/slash/no-payout/audit-fail
 npm run e2e:local:load       # N independent pipelines settle in parallel
-npm run e2e:local:all        # all three   (≈90s, 40 checks)
+npm run e2e:local:inline     # tunnel-free inline on-chain input (Option 3) — input from chain,
+                             # output via Walrus, no /inputs or /result HTTP. Needs the inline ABI;
+                             # SKIPS-green on a package that predates create_job_from_ask(input,…).
+npm run e2e:local:all        # all four    (happy+negatives+load+inline)
 
 # or directly:
 npx tsx harness.ts --net=localnet --node=mock --scenario=all --n=3

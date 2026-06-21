@@ -4,12 +4,19 @@
  * Given a settled job, ANYONE can reconstruct "paid-for-what-was-run" with no GIX infra
  * running, using only (a) the on-chain Job + AttestationRecord and (b) the Walrus I/O blobs:
  *
- *   read Job + AttestationRecord from Sui   (input_hash, output_hash, model_hash, blob ids, verdict)
- *   fetch input_bytes, output_bytes from Walrus by blob_id
+ *   read Job + AttestationRecord from Sui   (input, input_hash, output_hash, model_hash, blob ids, verdict)
+ *   obtain input_bytes  — from the on-chain `job.input` (inline / Option 3) OR Walrus by input_blob_id
+ *   fetch output_bytes  — from Walrus by output_blob_id
  *   assert sha2_256(input_bytes)  == input_hash
  *   assert sha2_256(output_bytes) == output_hash
  *   assert the attestation signature verifies over the byte-exact §2 canonical message
  *   assert model_hash == registered ModelRecord.model_hash
+ *
+ * For the tunnel-free inline path (Option 3) the prompt rides ON-CHAIN in `job.input`, so the
+ * input-integrity leg recomputes `sha2_256(job.input)` directly — no Walrus read, no `/inputs`
+ * HTTP. The OUTPUT leg always stays on Walrus (provider-paid blob). The independent recompute is
+ * identical either way: the blob id / on-chain field is only a TRANSPORT, never the integrity
+ * primitive (§4 F4).
  *
  * This module is PURE of any live SuiClient / Walrus construction: it takes a `JobAuditView`
  * (already read from chain) and a `WalrusBlobStore` (in-memory on localnet, real on testnet).
@@ -57,6 +64,10 @@ export interface JobAuditView {
   inputBlobId: bigint;
   /** Walrus output (completion) blob commitment; 0n ⇒ none. */
   outputBlobId: bigint;
+  /** Inline on-chain input bytes (Option 3 tunnel-free path). When present + non-empty, the
+   * input-integrity leg recomputes `sha2_256(inlineInput)` from this ON-CHAIN field and does NOT
+   * touch Walrus or the `/inputs` cache. Empty / undefined ⇒ fall back to the Walrus-blob path. */
+  inlineInput?: Uint8Array;
 }
 
 /** A blob source the audit reads I/O from (the InMemoryWalrus / RealWalrus from walrus.ts). */
@@ -107,20 +118,35 @@ export async function auditJob(
   const checks: AuditCheck[] = [];
 
   // 1. input integrity: sha2_256(input_bytes) == on-chain input_hash.
+  //    Inline (Option 3): the prompt is ON-CHAIN in `view.inlineInput` → recompute from it, no
+  //    Walrus read, no `/inputs` HTTP. Otherwise fall back to the Walrus input blob (or harness
+  //    bytes for the legacy mock path).
+  const inlineInput = view.inlineInput && view.inlineInput.length > 0 ? view.inlineInput : undefined;
   try {
-    const bytes = view.inputBlobId !== 0n ? await walrus.readByInt(view.inputBlobId) : opts.inputBytes;
+    let bytes: Uint8Array | undefined;
+    let source: string;
+    if (inlineInput) {
+      bytes = inlineInput;
+      source = "on-chain job.input (inline)";
+    } else if (view.inputBlobId !== 0n) {
+      bytes = await walrus.readByInt(view.inputBlobId);
+      source = "walrus";
+    } else {
+      bytes = opts.inputBytes;
+      source = "harness bytes";
+    }
     if (!bytes) {
-      checks.push({ name: "input_hash", ok: false, detail: "no input bytes available (blob id 0 and no bytes provided)" });
+      checks.push({ name: "input_hash", ok: false, detail: "no input bytes available (no inline input, blob id 0, no bytes provided)" });
     } else {
       const got = sha2Hex(bytes);
       checks.push({
         name: "input_hash",
         ok: got === normHex(view.inputHash),
-        detail: `sha2_256(input)=${got} vs on-chain ${normHex(view.inputHash)}`,
+        detail: `sha2_256(input)=${got} vs on-chain ${normHex(view.inputHash)} [src=${source}]`,
       });
     }
   } catch (e) {
-    checks.push({ name: "input_hash", ok: false, detail: `walrus read failed: ${(e as Error).message}` });
+    checks.push({ name: "input_hash", ok: false, detail: `input read failed: ${(e as Error).message}` });
   }
 
   // 2. output integrity: sha2_256(output_bytes) == on-chain output_hash.

@@ -105,6 +105,34 @@ describe("F7 audit verifier", () => {
     expect(report.checks.find((c) => c.name === "output_hash")!.ok).toBe(false);
   });
 
+  it("inline input (Option 3): input leg recomputes sha2_256(job.input) on-chain, no Walrus input read", async () => {
+    const { view, modelHash, outputBlobId } = await setup(GOLDEN_PROMPTS.P1.prompt);
+    // Inline path: no input blob; the prompt rides on-chain. Use a Walrus store that has ONLY the
+    // output blob so a stray input-blob read would throw and fail the test.
+    const walrus = new InMemoryWalrus();
+    await walrus.upload(new TextEncoder().encode(mockComplete(GOLDEN_PROMPTS.P1.prompt)));
+    const report = await auditJob(
+      { ...view, inputBlobId: 0n, outputBlobId, inlineInput: new TextEncoder().encode(GOLDEN_PROMPTS.P1.prompt) },
+      walrus,
+      { expectModelHash: modelHash },
+    );
+    expect(report.ok).toBe(true);
+    const inputCheck = report.checks.find((c) => c.name === "input_hash")!;
+    expect(inputCheck.ok).toBe(true);
+    expect(inputCheck.detail).toContain("inline");
+  });
+
+  it("inline input tamper: sha2_256(job.input) != input_hash → input_hash check FAILS", async () => {
+    const { walrus, view, modelHash } = await setup(GOLDEN_PROMPTS.P2.prompt);
+    const report = await auditJob(
+      { ...view, inputBlobId: 0n, inlineInput: new TextEncoder().encode("a tampered on-chain prompt") },
+      walrus,
+      { expectModelHash: modelHash },
+    );
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.name === "input_hash")!.ok).toBe(false);
+  });
+
   it("blob id 0n falls back to provided bytes (localnet mock-path)", async () => {
     const { view, modelHash } = await setup(GOLDEN_PROMPTS.P1.prompt);
     const walrus = new InMemoryWalrus(); // empty store

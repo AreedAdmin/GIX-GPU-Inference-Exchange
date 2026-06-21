@@ -2,7 +2,7 @@
 /**
  * GIX pool-free E2E acceptance harness (§5).
  *
- *   tsx harness.ts --net=localnet --node=mock --scenario=happy|negatives|load|all
+ *   tsx harness.ts --net=localnet --node=mock --scenario=happy|negatives|load|inline|all
  *
  * Modes:
  *   --node=mock   deterministic in-process provider (no GPU) — CI / L1–L5. (default)
@@ -37,6 +37,7 @@ import { Reporter } from "./report.js";
 import { runHappy } from "./scenarios/happy.js";
 import { runNegatives } from "./scenarios/negatives.js";
 import { runLoad } from "./scenarios/load.js";
+import { runInline } from "./scenarios/inline.js";
 import { BASE_NOW_MS } from "./fixtures/index.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -45,7 +46,7 @@ const REPO_ROOT = resolve(HERE, "..");
 interface Args {
   net: "localnet" | "testnet";
   node: "mock" | "gb10";
-  scenario: "happy" | "negatives" | "load" | "all";
+  scenario: "happy" | "negatives" | "load" | "inline" | "all";
   deploy: boolean;
   loadN: number;
   deploymentPath: string;
@@ -134,6 +135,13 @@ async function main(): Promise<number> {
     if (args.scenario === "load" || args.scenario === "all") {
       console.log(`--- scenario: load (n=${args.loadN}) ---`);
       await runLoad({ chain, node, walrus, rep, nowMs: BASE_NOW_MS, n: args.loadN });
+    }
+    if (args.scenario === "inline" || args.scenario === "all") {
+      console.log("--- scenario: inline (tunnel-free Option 3) ---");
+      // A FRESH mock node so its HTTP-cache tripwire reflects only the inline flow — the no-HTTP
+      // assertion is then strictly about this scenario's serve loop.
+      const inlineNode = new MockNode();
+      await runInline({ chain, node: inlineNode, walrus, rep, nowMs: BASE_NOW_MS });
     }
   } catch (e) {
     rep.assert("harness", "uncaught", false, (e as Error).stack ?? String(e));
