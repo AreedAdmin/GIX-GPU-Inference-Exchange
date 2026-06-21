@@ -100,15 +100,35 @@ export class ProviderClient {
 
   /** GET the settled result (output + signed-attestation fields) for a job. */
   async getResult(jobId: string): Promise<ProviderResult> {
-    const res = await fetch(`${this.base}/result/${encodeURIComponent(jobId)}`);
-    if (!res.ok) {
-      throw new Error(`provider GET /result/${jobId} failed: ${res.status} ${await safeText(res)}`);
+    // The node caches the result around settlement; a poller can hit /result a beat before
+    // it's stored (404 "not served yet") or while the node is briefly unreachable. Retry a
+    // few times with a short backoff before surfacing an error — so the user never has to.
+    const MAX_TRIES = 8;
+    const DELAY_MS = 1200;
+    let lastErr = "";
+    for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+      let res: Response | null = null;
+      try {
+        res = await fetch(`${this.base}/result/${encodeURIComponent(jobId)}`);
+      } catch (e) {
+        lastErr = `fetch failed: ${(e as Error).message}`;
+      }
+      if (res) {
+        if (res.status === 404) {
+          lastErr = "404 (not served yet)";
+        } else if (!res.ok) {
+          throw new Error(`provider GET /result/${jobId} failed: ${res.status} ${await safeText(res)}`);
+        } else {
+          const body = (await res.json()) as ProviderResult;
+          if (!body || typeof body.output !== "string" || typeof body.outputHash !== "string") {
+            throw new Error(`provider GET /result/${jobId}: malformed result (need output + outputHash)`);
+          }
+          return body;
+        }
+      }
+      if (attempt < MAX_TRIES - 1) await new Promise((r) => setTimeout(r, DELAY_MS));
     }
-    const body = (await res.json()) as ProviderResult;
-    if (!body || typeof body.output !== "string" || typeof body.outputHash !== "string") {
-      throw new Error(`provider GET /result/${jobId}: malformed result (need output + outputHash)`);
-    }
-    return body;
+    throw new Error(`provider GET /result/${jobId}: not ready after ${MAX_TRIES} tries (${lastErr})`);
   }
 
   /** GET /health — used to surface provider liveness in the UI. */

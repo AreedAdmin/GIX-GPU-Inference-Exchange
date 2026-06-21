@@ -187,6 +187,12 @@ export async function serveJob(
     attestPubkey: deps.attestPubkeyHex,
   };
 
+  // Cache the result IMMEDIATELY — BEFORE the on-chain submit/settle — so /result is
+  // available the instant a poller sees the job "Settled" on-chain. Otherwise there's a
+  // race: settle lands → web fetches /result → node hasn't cached yet → 404. Re-stored
+  // below once blob ids / digests are attached (putResult is idempotent by jobId).
+  store.putResult(result);
+
   // 4b. M2 — Walrus upload (testnet). Upload the completion + the signed attestation quote
   // as permanent blobs; their u256 blob ids ride along into submit_signed_attestation as
   // COMMITMENTS (the sha2_256 hashes remain the verification primitive). Best-effort: if the
