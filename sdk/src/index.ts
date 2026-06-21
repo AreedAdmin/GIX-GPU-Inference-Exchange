@@ -24,6 +24,7 @@ export type {
   MoveCallPlan,
   PlanArg,
   TerminalOutcome,
+  RestingAsk,
 } from "./chain.js";
 export {
   buildFillJobPlan,

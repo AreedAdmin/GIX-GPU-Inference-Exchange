@@ -101,6 +101,18 @@ export interface CreateJobOutcome {
   digest: string;
 }
 
+/** A resting provider Ask discovered on-chain (the maker side of a fill). */
+export interface RestingAsk {
+  /** The shared `Ask<M>` object id. */
+  askId: string;
+  /** The provider (maker) operator address. */
+  provider: string;
+  /** Price per SCU in `Q` base units (MOCK_USDC = 6dp). */
+  pricePerScu: bigint;
+  /** SCU still available to draw from this ask. */
+  remainingScu: bigint;
+}
+
 export interface TerminalOutcome {
   /** "Settled" | "Refunded" | "Expired" — derived from the observed event. */
   state: "Settled" | "Refunded" | "Expired" | "Attested";
@@ -444,6 +456,115 @@ export class GixChain {
     if (!jobId) throw new Error(`create_job_from_fill: no Job object created in tx ${res.digest}`);
     this.log("create_job_from_fill ok", { jobId, digest: res.digest });
     return { jobId, digest: res.digest };
+  }
+
+  /**
+   * Discover the provider's CURRENT resting `Ask<M>` for a market from chain.
+   *
+   * Queries the package's `AskPosted` events (newest first), keeps the ones for
+   * `market.id`, and returns the most recent one whose live `Ask<M>` object still
+   * exists and has SCU remaining. This survives provider/node restarts — the node
+   * posts a fresh Ask at startup, so a hardcoded id goes stale, but the latest
+   * `AskPosted` event always points at the live one.
+   *
+   * Returns `undefined` when no live ask is found for the market.
+   */
+  async findLatestAsk(market: MarketDeployment): Promise<RestingAsk | undefined> {
+    await this.connect();
+    const res = await this.client.queryEvents({
+      query: { MoveEventType: `${this.pkg}::events::AskPosted` },
+      order: "descending",
+      limit: 50,
+    });
+    for (const ev of res.data) {
+      const j = (ev.parsedJson ?? {}) as Record<string, unknown>;
+      if (j.market_id !== market.id) continue;
+      const askId = j.ask_id as string | undefined;
+      if (!askId) continue;
+      // Confirm the ask object is still live (not fully drawn / deleted) and read
+      // its authoritative price + remaining off the object, not the stale event.
+      const obj = await this.client.getObject({ id: askId, options: { showContent: true } });
+      const content = obj.data?.content as
+        | { dataType?: string; fields?: Record<string, unknown> }
+        | undefined;
+      if (!content || content.dataType !== "moveObject") continue;
+      const remaining = BigInt((content.fields?.remaining_scu as string | number | undefined) ?? 0);
+      if (remaining <= 0n) continue;
+      return {
+        askId,
+        provider: content.fields?.provider as string,
+        pricePerScu: BigInt(content.fields?.price_usdc_per_scu as string | number),
+        remainingScu: remaining,
+      };
+    }
+    return undefined;
+  }
+
+  /**
+   * Buy compute by filling a resting `Ask<M>` (the consumer-signed taker path,
+   * buyer ≠ seller). Carries the prompt INLINE on-chain (Option 3): `input` =
+   * UTF-8 bytes, `input_hash` = sha2_256(input). Escrow = `qty × pricePerScu` of
+   * the deployment's `Q` (MOCK_USDC) is split from the consumer's coin and locked.
+   *
+   * Mirrors `job::create_job_from_ask<M, Q>` exactly; the running provider node
+   * watches `Dispatched`, reads the prompt from chain, runs the model, signs an
+   * attestation, and settles.
+   */
+  async createJobFromAsk(args: {
+    signer: WalletSigner;
+    market: MarketDeployment;
+    askId: string;
+    scuQty: bigint;
+    pricePerScu: bigint;
+    /** Raw prompt bytes carried inline on-chain. */
+    input: Uint8Array;
+    /** sha2_256(input) as hex (with or without 0x). */
+    inputHashHex: string;
+  }): Promise<CreateJobOutcome & { escrowUsdc: bigint }> {
+    await this.connect();
+    const consumer = args.signer.toSuiAddress();
+    const escrowUsdc = args.scuQty * args.pricePerScu;
+
+    const tx = new this.Transaction();
+    const escrowCoin = await this.splitEscrowCoin(tx, consumer, escrowUsdc);
+    tx.moveCall({
+      target: `${this.pkg}::job::create_job_from_ask`,
+      typeArguments: [args.market.creditType, this.usdcType],
+      arguments: [
+        tx.object(this.cfgId),
+        tx.object(args.market.id),
+        tx.object(args.askId),
+        tx.pure.u64(args.scuQty),
+        escrowCoin,
+        tx.pure.vector("u8", Array.from(args.input)),
+        tx.pure.vector("u8", hexToBytes(args.inputHashHex)),
+        tx.object(this.clockId),
+      ],
+    });
+
+    const res = await this.execute(tx, args.signer);
+    const status = res.effects?.status;
+    if (status && status.status !== "success") {
+      throw new Error(`create_job_from_ask tx ${res.digest} failed: ${status.error ?? "unknown"}`);
+    }
+    const jobId = this.firstCreatedOfType(res, `${this.pkg}::job::Job`);
+    if (!jobId) throw new Error(`create_job_from_ask: no Job object created in tx ${res.digest}`);
+    this.log("create_job_from_ask ok", { jobId, digest: res.digest, escrowUsdc: String(escrowUsdc) });
+    return { jobId, digest: res.digest, escrowUsdc };
+  }
+
+  /** Read a Job's current on-chain lifecycle `state` (u8). Throws if the object
+   * is missing. See `gix::job` state constants (3=Dispatched … 7=Settled). */
+  async readJobState(jobId: string): Promise<number> {
+    await this.connect();
+    const obj = await this.client.getObject({ id: jobId, options: { showContent: true } });
+    const content = obj.data?.content as
+      | { dataType?: string; fields?: Record<string, unknown> }
+      | undefined;
+    if (!content || content.dataType !== "moveObject") {
+      throw new Error(`readJobState: job ${jobId} not found`);
+    }
+    return Number(content.fields?.state ?? 0);
   }
 
   /** Sign + execute via the WalletSigner seam (keypair OR injected wallet). */
