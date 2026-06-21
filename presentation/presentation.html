@@ -431,14 +431,14 @@
   const NOTES=[
     "Open with the one-liner: GIX is a hardware-verified spot market for GPU inference, settled on Sui — and it's a working build live on testnet, not a concept. Name the six things we shipped.",
     "Frame the pain: you rent whole GPUs and pay for idle time; pricing is a list, not a market; and a black-box API can silently swap or quantize the model — you can't prove what ran. Settlement and SLAs hinge on trusting one company.",
+    "After the pain, plant the flag: make compute a liquid, verifiable commodity — cheaper than renting, provable unlike a black box. One line per audience (builders, providers, ecosystem). This is the 'why' the rest of the deck delivers on.",
     "The answer is an exchange with three Sui-native parts: match on DeepBook, verify in hardware on-chain, settle on Sui with a Walrus audit trail. Stress that off-chain services hold no authority.",
     "Walk the six layers top-down: apps → Sui gix logic → DeepBook matching → Walrus storage → provider execution → hardware trust. Emphasize authority concentrates in L2 (Sui); every other layer is swappable.",
     "Trace one job: order+match (DeepBook fill) → escrow USDC → dispatch → run in the TEE → attest → on-chain verify. Pass settles + pays; fail refunds + slashes. Each Job is its own object → parallel settlement.",
     "This is the moat. The contract checks the signature chain, the allowlisted measurement, the hash binding, and SLA/nonce. The guarantee: the approved model ran on your exact input and produced this output — re-verifiable from Sui + Walrus by anyone.",
     "Sweep the feature grid quickly; land on the four that matter: verifiable execution, neutral spot market, pay-per-inference, drop-in API. The rest (on-ramp, crypto pairs, wallet, two-machine demo) show it's a real product.",
     "Show how people actually use it: the gateway (drop-in API), the web console, the SDK with independent verification, and the provider node + GPU-less client (buyer ≠ seller). State the wedge: not cheapest tokens — verifiable/neutral compute.",
-    "Be concrete on traction: contracts on testnet, DeepBook+Walrus wired (M2), node/gateway/SDK/web/harness, two-machine demo, on-ramp. Then the roadmap: real TEE attestation (M3), audit, mainnet, confidential markets via Seal.",
-    "Close on the vision: make compute a liquid, verifiable commodity — cheaper than renting, provable unlike a black box. One line per audience (builders, providers, ecosystem). End on the repo link and invite questions."
+    "Be concrete on traction: contracts on testnet, DeepBook+Walrus wired (M2), node/gateway/SDK/web/harness, two-machine demo, on-ramp. Then the roadmap: real TEE attestation (M3), audit, mainnet, confidential markets via Seal."
   ];
   const slides=[...document.querySelectorAll('.slide')];
   const dotsEl=document.getElementById('dots'),counter=document.getElementById('counter'),capEl=document.getElementById('cap');
