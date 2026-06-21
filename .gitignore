@@ -16,8 +16,12 @@ Pub.*.toml
 # ── Local runtime / secrets ────────────────────────────────────
 .run/
 .keys/
+*.key
+*.pem
 *.log
 *.local
+*.bak
+*.bak-*
 
 # ── Environment files (keep the templates) ─────────────────────
 .env
