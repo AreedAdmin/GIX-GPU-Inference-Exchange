@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useGix } from "../store";
 import { ConnectionDot } from "./ConnectionDot";
+import { ActivityBar } from "./ActivityBar";
 import { DEPLOYMENT, shortId } from "../lib/config";
 import { fmtClock } from "../lib/format";
 
@@ -60,7 +61,13 @@ export function StatusBar() {
         <span className="num" style={{ color: "var(--sell)" }}>{slashed}</span>
       </Seg>
 
-      <div className="ml-auto flex items-center gap-4">
+      <Div />
+      {/* per-wallet order/activity history — links each tx to Suiscan */}
+      <div className="min-w-0 flex-1 overflow-visible">
+        <ActivityBar />
+      </div>
+
+      <div className="ml-auto flex shrink-0 items-center gap-4">
         <Seg>
           <span className="label-micro">feed</span>
           <span className="num uppercase text-muted">{source.kind}</span>

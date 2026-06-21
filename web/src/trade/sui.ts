@@ -2,12 +2,16 @@
 // The REAL OrderClient (UI contract §5; demo-milestone-contract §4/§5). Replaces
 // MockOrderClient via store.tsx `orderClientRef` when VITE_ORDER_CLIENT=sui.
 //
-// `buy(market, qtyScu, price, prompt)` IS the demo-contract runTask flow:
-//   1. POST {prompt} to the provider node /inputs            → { inputHash }
-//   2. create_job<M>(... input_hash ...) funding MOCK_USDC escrow, signed by the
-//      connected wallet/burner                                → shared Job id + digest
-//   3. the store tracks the job; when it reaches Attested/Settled the result viewer
-//      GETs /result/:jobId, re-hashes the output, and checks it vs the on-chain hash.
+// `runTask(market, qtyScu, price, prompt)` IS the Option-3 tunnel-free buy flow
+// (docs/option3-inline-input-interface.md §C):
+//   1. compute input bytes (UTF-8 of the prompt) + input_hash = sha2_256(prompt) IN-BROWSER
+//      (WebCrypto) — NO `POST /inputs`; the prompt rides inline in the tx.
+//   2. create_job_from_ask<M>(... input, input_hash, input_blob_id=0 ...) funding the
+//      MOCK_USDC escrow against the provider's shared Ask, signed by the connected
+//      wallet/burner                                          → shared Job id + digest
+//   3. the store tracks the job; when it settles the result viewer downloads the output
+//      from WALRUS by the job's output_blob_id, re-hashes it, and checks it vs the
+//      on-chain output_hash (the HTTP /result endpoint is a last-resort fallback only).
 //
 // Reuses the harness chain patterns (harness/src/chain/sui.ts): lazy @mysten/sui import,
 // PTB shape for create_job, owned-object discovery for the provider stake + credit coin.
@@ -29,7 +33,7 @@ import {
 } from "./burner";
 import {
   ProviderClient,
-  fetchVerifiedResult,
+  fetchVerifiedResultFromWalrus,
   sha2_256Bytes,
   type JobResult,
 } from "./result";
@@ -77,10 +81,6 @@ export class SuiOrderClient implements OrderClient {
   private client!: SuiClientT;
   private Transaction!: new () => TransactionT;
   private connected = false;
-
-  /** Discovered once per provider: its ProviderStake id + a Credit<M> coin id. */
-  private providerStakeId: string | null = null;
-  private providerCreditCoinId: string | null = null;
 
   /** Optional injected signer (e.g. a dapp-kit wallet adapter on testnet). When absent,
    *  connect() builds the localnet burner. */
@@ -231,7 +231,10 @@ export class SuiOrderClient implements OrderClient {
     };
   }
 
-  /** runTask = the demo-contract buy: POST prompt → create_job (fund escrow) → return job. */
+  /** runTask = the tunnel-free Option-3 buy: carry the prompt INLINE in the
+   *  `create_job_from_ask` tx (input bytes + sha2_256 input_hash, input_blob_id=0),
+   *  fund the MOCK_USDC escrow against the provider's shared Ask, return the job.
+   *  No `POST /inputs` — the Mac never connects to the DGX; the prompt rides the tx. */
   async runTask(args: RunTaskArgs): Promise<RunTaskResult> {
     await this.ensureClient();
     if (!this.signer) return { ok: false, error: "wallet not connected" };
@@ -246,33 +249,34 @@ export class SuiOrderClient implements OrderClient {
       };
     }
 
+    // The Ask is the provider's resting liquidity, posted at deploy time. Without it the
+    // tunnel-free path can't fund a job — degrade gracefully (don't build an invalid PTB).
+    if (!market.askId) {
+      return {
+        ok: false,
+        error:
+          "No provider Ask is provisioned for this market yet — the provider posts it at " +
+          "deploy time (staking::post_ask). Set VITE_MARKET_ASK_ID once it's published, " +
+          "then retry the tunnel-free buy.",
+      };
+    }
+
     const escrowBase = toBaseUnits(args.qtyScu * args.priceUsdcPerScu);
     if (escrowBase <= 0) return { ok: false, error: "escrow must be > 0 (set a price)" };
 
-    // 1. Submit the prompt to the provider; it caches by hash and returns input_hash.
-    //    Fall back to a local sha2_256 if the provider is unreachable so the on-chain
-    //    create_job still binds the right hash for the node to match against later.
-    let inputHashHex: string;
-    try {
-      const { inputHash } = await this.provider.submitInput(args.prompt);
-      inputHashHex = inputHash;
-    } catch (e) {
-      console.warn("[gix] provider /inputs unreachable; computing input_hash locally", e);
-      const bytes = await sha2_256Bytes(args.prompt);
-      inputHashHex = bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
-    }
+    // 1. Inline input: the prompt's UTF-8 bytes ride in the tx, and the integrity hash is
+    //    sha2_256(prompt) computed client-side (WebCrypto — byte-identical to Move's
+    //    sha2_256, same primitive audit.ts uses). No /inputs round-trip to the provider.
+    const inputBytes = Array.from(new TextEncoder().encode(args.prompt));
+    const inputHashBytes = await sha2_256Bytes(args.prompt);
+    const inputHashHex = inputHashBytes
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
 
-    // 2. Resolve the provider's ProviderStake + Credit<M> coin (the stubbed match
-    //    counterparty), then build + sign create_job funding the MOCK_USDC escrow.
-    try {
-      await this.resolveProviderObjects();
-    } catch (e) {
-      return { ok: false, error: (e as Error).message };
-    }
-
+    // 2. Build + sign create_job_from_ask against the shared Ask, funding the escrow.
     let tx: TransactionT;
     try {
-      tx = await this.buildCreateJobTx(escrowBase, args.qtyScu, inputHashHex);
+      tx = await this.buildCreateJobFromAskTx(escrowBase, args.qtyScu, inputBytes, inputHashBytes);
     } catch (e) {
       return { ok: false, error: (e as Error).message };
     }
@@ -286,12 +290,55 @@ export class SuiOrderClient implements OrderClient {
     }
   }
 
-  /** Fetch + verify the settled result for a job (called by the store/result viewer). */
+  /** Fetch + verify the settled result for a job (called by the store/result viewer).
+   *  Option 3: download the output from Walrus by the job's `output_blob_id` (read the
+   *  shared Job object on chain), recompute sha2_256 in-browser, and verify it against the
+   *  on-chain `output_hash` — no `GET /result/:jobId`. The provider HTTP endpoint is kept
+   *  only as a last-resort fallback (e.g. before the output blob is published). */
   async getResult(
     jobId: string,
-    extra?: { costUsdc?: number; digest?: string },
+    extra?: { costUsdc?: number; digest?: string; jobFields?: JobFields | null },
   ): Promise<JobResult> {
-    return fetchVerifiedResult(this.provider, jobId, extra);
+    await this.ensureClient();
+    // Reuse pre-read Job fields when the caller already fetched them (avoids a 2nd getObject).
+    const job = extra?.jobFields ?? (await this.readJobFields(jobId));
+    return fetchVerifiedResultFromWalrus({
+      jobId,
+      client: this.client,
+      provider: this.provider,
+      model: this.cfg.market.name,
+      walrusAggregator: this.cfg.walrusAggregator,
+      outputBlobId: job?.outputBlobId,
+      outputHashHex: job?.outputHashHex,
+      extra: { costUsdc: extra?.costUsdc, digest: extra?.digest },
+    });
+  }
+
+  /** Read the inline input + output-blob/hash commitments off the shared Job object.
+   *  Returns undefined fields when the object/field isn't readable (degrades to fallback). */
+  async readJobFields(jobId: string): Promise<JobFields | null> {
+    await this.ensureClient();
+    try {
+      const obj = await this.client.getObject({
+        id: jobId,
+        options: { showContent: true },
+      });
+      const content = (obj as { data?: { content?: unknown } }).data?.content as
+        | { dataType?: string; fields?: Record<string, unknown> }
+        | undefined;
+      if (!content || content.dataType !== "moveObject" || !content.fields) return null;
+      const f = content.fields;
+      return {
+        input: decodeMoveU8Vector(f["input"]),
+        inputHashHex: decodeMoveU8VectorHex(f["input_hash"]),
+        outputHashHex: decodeMoveU8VectorHex(f["output_hash"]),
+        outputBlobId: decodeMoveBlobId(f["output_blob_id"]),
+        inputBlobId: decodeMoveBlobId(f["input_blob_id"]),
+      };
+    } catch (e) {
+      console.warn("[gix] could not read Job object fields", e);
+      return null;
+    }
   }
 
   /** Provider /health (surfaced as a liveness hint in the UI). */
@@ -301,76 +348,38 @@ export class SuiOrderClient implements OrderClient {
 
   // ── chain helpers (mirror harness/src/chain/sui.ts) ─────────────────────────
 
-  /** Discover the provider's ProviderStake id + a Credit<M> coin id via owned objects.
-   *  In M1/the demo the provider operator (cfg.providerAddress) holds both, minted at
-   *  node setup. Cached after the first resolve. */
-  private async resolveProviderObjects(): Promise<void> {
-    if (this.providerStakeId && this.providerCreditCoinId) return;
-    const owner = this.cfg.providerAddress;
-    const stakeType = `${this.cfg.packageId}::staking::ProviderStake`;
-    const creditType = `${this.cfg.packageId}::credit::Credit<${this.cfg.market.creditType}>`;
-
-    let cursor: string | null | undefined = undefined;
-    do {
-      const page = await this.client.getOwnedObjects({
-        owner,
-        cursor,
-        options: { showType: true },
-      });
-      for (const o of page.data) {
-        const t = o.data?.type ?? "";
-        if (!this.providerStakeId && t === stakeType) {
-          this.providerStakeId = o.data!.objectId;
-        }
-        if (!this.providerCreditCoinId && t.startsWith(`0x2::coin::Coin<${creditType}`)) {
-          this.providerCreditCoinId = o.data!.objectId;
-        }
-      }
-      cursor = page.hasNextPage ? page.nextCursor : null;
-    } while (cursor && (!this.providerStakeId || !this.providerCreditCoinId));
-
-    if (!this.providerStakeId) {
-      throw new Error(
-        `no ProviderStake owned by provider ${owner.slice(0, 10)}… — is the provider node registered + staked?`,
-      );
-    }
-    if (!this.providerCreditCoinId) {
-      throw new Error(
-        `no Credit<M> coin owned by provider ${owner.slice(0, 10)}… — has it minted credits for this market?`,
-      );
-    }
-  }
-
-  /** Build the create_job<M> PTB. Splits the exact MOCK_USDC escrow from the buyer's
-   *  coins and a Credit<M> slice from the provider's coin (matches harness createJob). */
-  private async buildCreateJobTx(
+  /** Build the tunnel-free `create_job_from_ask<M>` PTB (Option 3, pinned ABI §C):
+   *  fund the exact MOCK_USDC escrow from the buyer's coins against the shared Ask, and
+   *  carry the prompt INLINE — `input` (raw UTF-8 bytes), `input_hash` (sha2_256), and
+   *  `input_blob_id = 0` (no Walrus write). The consumer needs NO provider-owned object;
+   *  the shared `Ask<M>` (and its pre-minted credits) is the counterparty. */
+  private async buildCreateJobFromAskTx(
     escrowBase: number,
     qtyScu: number,
-    inputHashHex: string,
+    inputBytes: number[],
+    inputHashBytes: number[],
   ): Promise<TransactionT> {
     const tx = new this.Transaction();
     const market = this.cfg.market;
 
     // escrow_in: a Coin<MOCK_USDC> of exactly `escrowBase`, split from the buyer's coins.
     const escrowCoin = await this.splitEscrowCoin(tx, this.signer!.address, escrowBase);
-    // credits: a Credit<M> slice for qtyScu out of the provider's minted coin.
-    const creditCoin = tx.splitCoins(tx.object(this.providerCreditCoinId!), [
-      tx.pure.u64(BigInt(qtyScu)),
-    ])[0];
 
-    // create_job<M>(cfg, market, stake: &mut ProviderStake, provider, credits, escrow_in,
-    //   input_hash, clk, ctx): ID — shares the Job; consumer is ctx.sender() (the buyer).
+    // create_job_from_ask<M, Q>(cfg, market, ask: &mut Ask<M>, qty_scu, escrow_in,
+    //   input, input_hash, clk, ctx): ID — shares the Job; consumer is
+    //   ctx.sender() (the buyer). `Q` (escrow coin type) is inferred from escrow_in, so
+    //   only `M` is given as an explicit type arg (mirrors the create_job PTB).
     tx.moveCall({
-      target: `${this.cfg.packageId}::job::create_job`,
+      target: `${this.cfg.packageId}::job::create_job_from_ask`,
       typeArguments: [market.creditType],
       arguments: [
         tx.object(this.cfg.configId),
         tx.object(market.id),
-        tx.object(this.providerStakeId!),
-        tx.pure.address(this.cfg.providerAddress),
-        creditCoin,
+        tx.object(market.askId),
+        tx.pure.u64(BigInt(qtyScu)),
         escrowCoin,
-        tx.pure.vector("u8", hexToBytes(inputHashHex)),
+        tx.pure.vector("u8", inputBytes),
+        tx.pure.vector("u8", inputHashBytes),
         tx.object(this.cfg.clockId),
       ],
     });
@@ -415,12 +424,54 @@ export class SuiOrderClient implements OrderClient {
   }
 }
 
-// --- pure helpers ----------------------------------------------------------
-function hexToBytes(hex: string): number[] {
-  const clean = /^0x/i.test(hex) ? hex.slice(2) : hex;
-  const out: number[] = [];
-  for (let i = 0; i + 1 < clean.length; i += 2) {
-    out.push(parseInt(clean.slice(i, i + 2), 16));
+// --- Job-object field decoding ---------------------------------------------
+
+/** The subset of the on-chain `Job<M, Q>` fields the web reads back (inline input +
+ *  the I/O hash/blob commitments) for the result fetch + AuditDrawer input check. */
+export interface JobFields {
+  /** The on-chain inline `input: vector<u8>` (empty when the Walrus-blob path was used). */
+  input?: Uint8Array;
+  /** sha2_256 of the input, hex (no 0x). */
+  inputHashHex?: string;
+  /** sha2_256 of the output, hex (no 0x). */
+  outputHashHex?: string;
+  /** Walrus blob id of the completion (`0`/none → undefined). */
+  outputBlobId?: string;
+  /** Walrus blob id of the prompt (`0`/none → undefined; inline jobs leave this 0). */
+  inputBlobId?: string;
+}
+
+/** Decode a Move `vector<u8>` from the JSON-RPC `showContent` shape (a number[] or a
+ *  base64 string, depending on serialization) into raw bytes. */
+function decodeMoveU8Vector(v: unknown): Uint8Array | undefined {
+  if (v == null) return undefined;
+  if (Array.isArray(v)) return Uint8Array.from(v as number[]);
+  if (typeof v === "string") {
+    // Some RPC encodings return vector<u8> as base64.
+    try {
+      const bin = atob(v);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    } catch {
+      return undefined;
+    }
   }
-  return out;
+  return undefined;
+}
+
+/** Decode a Move `vector<u8>` into lowercase hex (no 0x). */
+function decodeMoveU8VectorHex(v: unknown): string | undefined {
+  const bytes = decodeMoveU8Vector(v);
+  if (!bytes) return undefined;
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Decode a Move `u256` blob id (string|number) → a non-zero decimal string, or undefined
+ *  when it's `0`/absent (the inline-input path commits no Walrus blob). */
+function decodeMoveBlobId(v: unknown): string | undefined {
+  if (v == null) return undefined;
+  const s = typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
+  if (!s || s === "0") return undefined;
+  return s;
 }

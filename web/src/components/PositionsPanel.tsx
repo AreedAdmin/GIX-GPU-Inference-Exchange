@@ -91,10 +91,15 @@ function stageIndex(s: JobState): number {
 }
 
 function MyJobsTab() {
-  const { jobs, markets } = useGix();
+  const { jobs, markets, account, isLiveChain } = useGix();
   const nameOf = (id: string) => markets.find((m) => m.id === id)?.name ?? shortId(id);
+  // When connected to a real account, show ONLY this wallet's jobs.
+  const mine =
+    isLiveChain && account
+      ? jobs.filter((j) => j.consumer === account.address)
+      : jobs;
 
-  if (jobs.length === 0) return <Empty msg="no jobs yet — place an order or wait for the stream" />;
+  if (mine.length === 0) return <Empty msg="no jobs yet — place an order to get started" />;
 
   return (
     <table className="w-full border-collapse text-[11.5px]">
@@ -111,7 +116,7 @@ function MyJobsTab() {
         </tr>
       </thead>
       <tbody>
-        {jobs.map((j) => (
+        {mine.map((j) => (
           <JobRowView key={j.jobId} job={j} market={nameOf(j.marketId)} />
         ))}
       </tbody>
@@ -408,9 +413,14 @@ function BalancesTab() {
 
 // ── History (terminal jobs) ───────────────────────────────────────────────────
 function HistoryTab() {
-  const { jobs, markets } = useGix();
+  const { jobs, markets, account, isLiveChain } = useGix();
   const nameOf = (id: string) => markets.find((m) => m.id === id)?.name ?? shortId(id);
-  const hist = jobs.filter((j) => TERMINAL.includes(j.state));
+  // When connected to a real account, history is ONLY this wallet's terminal jobs.
+  const mine =
+    isLiveChain && account
+      ? jobs.filter((j) => j.consumer === account.address)
+      : jobs;
+  const hist = mine.filter((j) => TERMINAL.includes(j.state));
   if (hist.length === 0)
     return <Empty msg="no settled / refunded / slashed jobs yet" />;
   return (

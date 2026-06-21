@@ -47,6 +47,8 @@ export interface BlobRef {
   url?: string;
   /** True if synthesized (mock) rather than a real on-chain blob id. */
   mock: boolean;
+  /** Option 3: the bytes live inline on-chain (in the tx), not in a Walrus blob. */
+  onChain?: boolean;
 }
 
 export interface AuditResult {
@@ -74,6 +76,11 @@ export interface AuditTarget {
   inputText?: string;
   /** The model output text — used to recompute the output hash. */
   outputText?: string;
+
+  /** Option 3 inline-input jobs: the raw on-chain `job.input` bytes. When present, the
+   *  input check hashes THESE (read straight from chain, not Walrus) vs the on-chain
+   *  input_hash — input rode in the tx, so there is no input blob to fetch. */
+  inlineInputBytes?: Uint8Array;
 
   /** On-chain input_hash (sha2_256 of input bytes), hex. */
   inputHash?: string;
@@ -150,9 +157,13 @@ export async function runAudit(t: AuditTarget): Promise<AuditResult> {
   const blobs: BlobRef[] = [];
 
   // ── input_hash ────────────────────────────────────────────────────────────
-  // Real: fetch input blob from Walrus, sha2_256 it, compare to on-chain input_hash.
-  // Mock: synthesize input bytes/hash from the prompt so the check passes ✅ (labelled).
-  {
+  // Option 3 inline-input jobs: the prompt rode IN THE TX, so verify it from the
+  // on-chain `job.input` bytes (+ sha2_256) — no Walrus input blob to fetch.
+  // Otherwise: real → fetch input blob from Walrus, sha2_256 it, compare to input_hash;
+  // mock → synthesize input bytes/hash from the prompt so the check passes ✅ (labelled).
+  if (t.live && t.inlineInputBytes) {
+    checks.push(await auditInlineInput(t.inlineInputBytes, t.inputHash, blobs));
+  } else {
     const c = await auditHash({
       id: "input_hash",
       label: "Input blob → input_hash",
@@ -234,6 +245,38 @@ export async function runAudit(t: AuditTarget): Promise<AuditResult> {
   const anyMock = checks.some((c) => c.mock) || blobs.some((b) => b.mock);
 
   return { jobId: t.jobId, checks, blobs, explorerUrl, ok, anyMock };
+}
+
+/** Option 3 inline-input check: hash the on-chain `job.input` bytes and compare to the
+ *  on-chain `input_hash`. Reads nothing from Walrus (the prompt rode in the tx). Records a
+ *  BlobRef noting the input is on-chain (no blob), so the Walrus-links section stays honest. */
+async function auditInlineInput(
+  inputBytes: Uint8Array,
+  reportedHash: string | undefined,
+  blobs: BlobRef[],
+): Promise<AuditCheck> {
+  // Hash the exact on-chain bytes (not the decoded text — non-UTF8 bytes must still match).
+  const ab = inputBytes.buffer.slice(
+    inputBytes.byteOffset,
+    inputBytes.byteOffset + inputBytes.byteLength,
+  ) as ArrayBuffer;
+  const hash = await sha2_256HexBuffer(ab);
+  const reported = reportedHash ?? "";
+  const status: CheckStatus = reported ? (hexEquals(hash, reported) ? "pass" : "fail") : "pass";
+  // The input is on-chain (inline in the tx), not a Walrus blob.
+  blobs.push({ kind: "input", mock: false, onChain: true });
+  return {
+    id: "input_hash",
+    label: "On-chain job.input → input_hash",
+    status,
+    mock: false,
+    reported: reported ? short(reported) : "—",
+    computed: short(hash),
+    detail:
+      status === "pass"
+        ? "sha2_256 of the on-chain inline job.input matches the committed input_hash (input rode in the tx — no Walrus read)."
+        : "Recomputed hash of the on-chain inline job.input does NOT match the committed input_hash — integrity check failed.",
+  };
 }
 
 /** Shared hash-check builder for input/output. Pushes a BlobRef and returns the check. */

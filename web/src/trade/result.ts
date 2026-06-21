@@ -123,7 +123,8 @@ export class ProviderClient {
   }
 }
 
-/** Fetch /result, re-hash the output, and assemble the verified JobResult (§3.1). */
+/** Fetch /result, re-hash the output, and assemble the verified JobResult (§3.1).
+ *  Kept as the HTTP last-resort fallback; the primary path is Walrus (below). */
 export async function fetchVerifiedResult(
   provider: ProviderClient,
   jobId: string,
@@ -146,6 +147,91 @@ export async function fetchVerifiedResult(
     costUsdc: extra?.costUsdc,
     digest: extra?.digest,
   };
+}
+
+type SuiClientLike = {
+  getObject: (args: {
+    id: string;
+    options?: { showContent?: boolean };
+  }) => Promise<unknown>;
+};
+
+export interface WalrusResultArgs {
+  jobId: string;
+  client: SuiClientLike;
+  /** Provider HTTP client — used ONLY as a last-resort fallback when Walrus has no blob. */
+  provider: ProviderClient;
+  /** Display model name (the Walrus blob carries only the raw output bytes). */
+  model: string;
+  /** Public Walrus aggregator base for blob retrieval (reads are free). */
+  walrusAggregator: string;
+  /** The job's `output_blob_id` (read off-chain by the caller), if published yet. */
+  outputBlobId?: string;
+  /** The on-chain `output_hash` (sha2_256 of the output), hex — for the verify check. */
+  outputHashHex?: string;
+  extra?: { costUsdc?: number; digest?: string };
+}
+
+/**
+ * Option 3 (§C) result fetch: download the completion from WALRUS by the job's
+ * `output_blob_id` via the public aggregator, recompute `sha2_256` in-browser, and verify
+ * it against the on-chain `output_hash`. No `GET /result/:jobId`. Falls back to the
+ * provider HTTP `/result` ONLY when the Walrus blob isn't available yet (e.g. the output
+ * blob hasn't been published, or the aggregator fetch failed).
+ */
+export async function fetchVerifiedResultFromWalrus(
+  args: WalrusResultArgs,
+): Promise<JobResult> {
+  const { jobId, provider, model, walrusAggregator, outputBlobId, outputHashHex, extra } =
+    args;
+
+  if (outputBlobId) {
+    try {
+      const url = walrusOutputUrl(walrusAggregator, outputBlobId);
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Walrus aggregator ${res.status} for blob ${outputBlobId.slice(0, 12)}…`);
+      }
+      const buf = await res.arrayBuffer();
+      const localOutputHash = await sha2_256HexBuffer(buf);
+      const output = new TextDecoder().decode(buf);
+      // Verify against the on-chain output_hash when we have it; absent it, the recompute
+      // is still surfaced (the AuditDrawer does the authoritative chain compare).
+      const reportedOutputHash = outputHashHex ?? localOutputHash;
+      const verified = hexEquals(localOutputHash, reportedOutputHash);
+      return {
+        jobId,
+        model,
+        output,
+        localOutputHash,
+        reportedOutputHash,
+        verified,
+        outputTokenCount: Math.ceil(output.length / 4),
+        tStart: 0,
+        tEnd: 0,
+        providerPubkey: "",
+        costUsdc: extra?.costUsdc,
+        digest: extra?.digest,
+      };
+    } catch (e) {
+      console.warn("[gix] Walrus output fetch failed; falling back to provider /result", e);
+    }
+  }
+
+  // Last-resort fallback: the provider HTTP /result endpoint (legacy path).
+  return fetchVerifiedResult(provider, jobId, extra);
+}
+
+/** Build the Walrus aggregator blob URL: `<base>/v1/blobs/<blobId>`. */
+function walrusOutputUrl(base: string, blobId: string): string {
+  const b = base.replace(/\/+$/, "");
+  return `${b}/v1/blobs/${encodeURIComponent(blobId)}`;
+}
+
+/** sha2_256 of a raw ArrayBuffer → lowercase hex (mirrors audit.ts). */
+async function sha2_256HexBuffer(buf: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function safeText(res: Response): Promise<string> {

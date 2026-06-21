@@ -25,7 +25,7 @@ import type {
   Trade,
 } from "./data/types";
 import { MockOrderClient } from "./trade/mock";
-import { SuiOrderClient } from "./trade/sui";
+import { SuiOrderClient, type JobFields } from "./trade/sui";
 import { orderClientKind, loadChainConfig, explorerTxUrl } from "./trade/config";
 import type { JobResult } from "./trade/result";
 import { sha2_256Hex as sha2_256HexBrowser } from "./trade/result";
@@ -68,6 +68,26 @@ export interface JobRow {
   updatedTs: number;
 }
 
+/** One row in the per-wallet activity log surfaced in the ActivityBar (bottom bar).
+ *  Pushed on every successful submitOrder, then updated when the tied job settles. */
+export interface ActivityEntry {
+  id: string;
+  kind: "buy" | "sell" | "run" | "buyAndRun" | "settle";
+  marketId: string;
+  sizeScu: number;
+  price: number;
+  /** Tx digest of the submitting action (links to Suiscan when on a real network). */
+  digest?: string;
+  /** Job id, for run/buyAndRun entries (so a settle update can find this row). */
+  jobId?: string;
+  /** Wallet that performed the action; the UI filters to the connected account. */
+  account?: string;
+  status: "submitted" | "settled" | "failed";
+  ts: number;
+}
+
+const MAX_ACTIVITY = 50;
+
 interface GixState {
   source: MarketDataSource;
   orderClient: OrderClient;
@@ -82,6 +102,10 @@ interface GixState {
   tickersByMarket: Record<string, Ticker>;
   jobs: JobRow[];
   openOrders: OpenOrder[];
+
+  /** Per-wallet order/activity log (newest first, bounded). The ActivityBar filters
+   *  this to the connected account and links each entry to Suiscan. */
+  activity: ActivityEntry[];
 
   // ticket prefill (set when a book row is clicked)
   prefillPrice: number | null;
@@ -178,9 +202,14 @@ export function GixProvider({ children }: { children: ReactNode }) {
   const [tickersByMarket, setTickersByMarket] = useState<Record<string, Ticker>>({});
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [openOrders, setOpenOrders] = useState<OpenOrder[]>([]);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [prefillPrice, setPrefillPrice] = useState<number | null>(null);
 
   const [account, setAccount] = useState<Account | null>(null);
+  // mirror for callbacks (onJobs) that resubscribe only on `source`, so a settle update
+  // attributes to the wallet connected at settle time without re-running the effect.
+  const accountRef = useRef<Account | null>(account);
+  accountRef.current = account;
   const [balances, setBalances] = useState<Balances | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [funding, setFunding] = useState(false);
@@ -200,6 +229,9 @@ export function GixProvider({ children }: { children: ReactNode }) {
   const [viewingJobId, setViewingJobId] = useState<string | null>(null);
   // per-job buy-time metadata (prompt/cost/digest) for the viewer
   const jobMetaRef = useRef<Record<string, JobMeta>>({});
+  // per-job on-chain Job fields (inline input + I/O hash/blob commitments), read once at
+  // result-fetch time and reused by the F7 audit so the input check uses real chain bytes.
+  const jobFieldsRef = useRef<Record<string, JobFields>>({});
 
   // F7 in-browser audit state
   const [audits, setAudits] = useState<Record<string, AuditResult>>({});
@@ -274,8 +306,13 @@ export function GixProvider({ children }: { children: ReactNode }) {
     return () => unsubs.forEach((u) => u());
   }, [source, markets.length]);
 
-  // ── job lifecycle feed (global) ─────────────────────────────────────────────
+  // ── job lifecycle feed (mock/demo only) ─────────────────────────────────────
+  // On the live chain, "My Jobs"/"History" must reflect ONLY the connected wallet's
+  // real jobs — those are added directly by submitOrder / runTask. The data source's
+  // onJobs feed is the mock simulator's synthetic *global* activity, so injecting it
+  // would randomly fill history with trades that aren't yours. Skip it entirely when live.
   useEffect(() => {
+    if (isLiveChain) return;
     const src = sourceRef.current;
     const un = src.onJobs((j: JobUpdate) => {
       setJobs((prev) => {
@@ -315,9 +352,46 @@ export function GixProvider({ children }: { children: ReactNode }) {
             : o,
         ),
       );
+
+      // Activity log: when a job reaches a terminal on-chain outcome, reflect it on the
+      // entry that created the job (run/buyAndRun) — or append a standalone settle row if
+      // we never saw the create (e.g. mock-injected jobs). Keyed by jobId.
+      const terminal =
+        j.state === "Settled" || j.state === "Slashed" || j.state === "Refunded";
+      if (terminal) {
+        setActivity((prev) => {
+          const idx = prev.findIndex(
+            (e) => e.jobId === j.jobId && e.kind !== "settle",
+          );
+          if (idx >= 0) {
+            // mark the originating run/buyAndRun row as settled (or failed on slash).
+            const next = prev.slice();
+            next[idx] = {
+              ...next[idx],
+              status: j.state === "Slashed" ? "failed" : "settled",
+              ts: j.ts,
+            };
+            return next;
+          }
+          // no originating row (mock job) — append a settle entry so the outcome shows.
+          if (prev.some((e) => e.id === `settle-${j.jobId}`)) return prev;
+          const entry: ActivityEntry = {
+            id: `settle-${j.jobId}`,
+            kind: "settle",
+            marketId: j.marketId,
+            sizeScu: j.sizeScu,
+            price: j.price,
+            jobId: j.jobId,
+            account: j.consumer ?? accountRef.current?.address,
+            status: j.state === "Slashed" ? "failed" : "settled",
+            ts: j.ts,
+          };
+          return [entry, ...prev].slice(0, MAX_ACTIVITY);
+        });
+      }
     });
     return () => un();
-  }, [source]);
+  }, [source, isLiveChain]);
 
   const setActiveMarket = useCallback((id: string) => {
     setActiveMarketId(id);
@@ -391,18 +465,36 @@ export function GixProvider({ children }: { children: ReactNode }) {
       }
 
       if (res.ok) {
+        const now = Date.now();
         const order: OpenOrder = {
-          id: res.jobId ?? `ord-${Date.now().toString(36)}`,
+          id: res.jobId ?? `ord-${now.toString(36)}`,
           marketId: mkt,
           side,
           type,
           price,
           sizeScu,
           filledScu: 0,
-          ts: Date.now(),
+          ts: now,
           status: "open",
         };
         setOpenOrders((prev) => [order, ...prev].slice(0, 40));
+
+        // Record the activity entry for EVERY mode (buy/sell/run/buyAndRun). A run/
+        // buyAndRun row is later flipped to settled/failed by the job-lifecycle feed
+        // (matched on jobId). Tied to the connected wallet for per-account filtering.
+        const entry: ActivityEntry = {
+          id: res.jobId ?? `act-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          kind: mode,
+          marketId: mkt,
+          sizeScu,
+          price,
+          digest: res.digest,
+          jobId: res.jobId,
+          account: account?.address,
+          status: "submitted",
+          ts: now,
+        };
+        setActivity((prev) => [entry, ...prev].slice(0, MAX_ACTIVITY));
 
         // Only job-creating paths (run, buyAndRun) record job metadata + a My Jobs row.
         // Record buy-time metadata + (for the real chain, where there's no WS feed
@@ -415,7 +507,6 @@ export function GixProvider({ children }: { children: ReactNode }) {
             digest: res.digest,
           };
           if (client instanceof SuiOrderClient) {
-            const now = Date.now();
             setJobs((prev) => {
               if (prev.some((j) => j.jobId === res!.jobId)) return prev;
               const row: JobRow = {
@@ -488,9 +579,14 @@ export function GixProvider({ children }: { children: ReactNode }) {
       });
       try {
         const meta = jobMetaRef.current[jobId];
+        // Read the on-chain Job fields once (inline input + I/O hash/blob commitments) and
+        // cache them so the F7 audit reuses the same authoritative bytes (no double read).
+        const jobFields = await client.readJobFields(jobId);
+        if (jobFields) jobFieldsRef.current[jobId] = jobFields;
         const r = await client.getResult(jobId, {
           costUsdc: meta?.costUsdc,
           digest: meta?.digest,
+          jobFields,
         });
         resultsRef.current = { ...resultsRef.current, [jobId]: r };
         setResults((prev) => ({ ...prev, [jobId]: r }));
@@ -528,15 +624,20 @@ export function GixProvider({ children }: { children: ReactNode }) {
         const cfg = chainCfgRef.current;
         const r = resultsRef.current[jobId];
         const meta = jobMetaRef.current[jobId];
+        const jf = jobFieldsRef.current[jobId];
         const target: AuditTarget = {
           jobId,
           live: isLiveChain,
           model: r?.model ?? cfg.market.name,
           inputText: meta?.prompt,
           outputText: r?.output,
-          // on-chain output_hash is recorded in the JobResult; input/model hash + blob
-          // ids + raw signature aren't surfaced to the browser yet → undefined ⇒ mock.
-          outputHash: r?.reportedOutputHash,
+          // Option 3 (§C): for inline-input jobs the input is verified from the on-chain
+          // job.input bytes (+ sha2_256) — not Walrus. Output check stays Walrus (by blob
+          // id). Hashes come straight off the on-chain Job object when live.
+          inlineInputBytes: jf?.input && jf.input.length > 0 ? jf.input : undefined,
+          inputHash: jf?.inputHashHex,
+          outputHash: jf?.outputHashHex ?? r?.reportedOutputHash,
+          outputBlobId: jf?.outputBlobId,
           attestPubkey: r?.providerPubkey,
           explorerObjectBase: cfg.explorerObjectBase,
           walrusAggregator: cfg.walrusAggregator,
@@ -579,6 +680,7 @@ export function GixProvider({ children }: { children: ReactNode }) {
       tickersByMarket,
       jobs,
       openOrders,
+      activity,
       prefillPrice,
       setPrefillPrice,
       account,
@@ -618,6 +720,7 @@ export function GixProvider({ children }: { children: ReactNode }) {
       tickersByMarket,
       jobs,
       openOrders,
+      activity,
       prefillPrice,
       account,
       balances,

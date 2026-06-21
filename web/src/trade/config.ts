@@ -42,6 +42,12 @@ export interface MarketChainConfig {
   modelId: string;
   scuTokens: number;
   slaP99Ms: number;
+  /** Shared `Ask<M>` object id the consumer fills via `job::create_job_from_ask`
+   *  (Option 3 inline-input, tunnel-free buy). The PROVIDER posts the Ask at deploy
+   *  time (`staking::post_ask`) and publishes its id; the web reads it from here
+   *  (VITE_MARKET_ASK_ID / deployment). Empty until provisioned → the buy degrades
+   *  gracefully with a helpful message rather than building an invalid PTB. */
+  askId: string;
 }
 
 function env(key: string): string | undefined {
@@ -60,6 +66,9 @@ const LOCALNET_MARKET: MarketChainConfig = {
     "0x8266691ba5652e694d978f83fefbc9edc5028949f8523fa65c11773264e69d34",
   scuTokens: DEPLOYMENT.market.scuTokens,
   slaP99Ms: DEPLOYMENT.market.slaP99Ms,
+  // The shared Ask is posted by the provider at deploy time; localnet leaves it unset
+  // (the demo provisions it via VITE_MARKET_ASK_ID) so the buy degrades gracefully.
+  askId: "",
 };
 
 const LOCALNET_FAUCET_ID =
@@ -113,6 +122,7 @@ export function loadChainConfig(): ChainConfig {
       modelId: env("VITE_MARKET_MODEL_ID") ?? LOCALNET_MARKET.modelId,
       scuTokens: LOCALNET_MARKET.scuTokens,
       slaP99Ms: LOCALNET_MARKET.slaP99Ms,
+      askId: env("VITE_MARKET_ASK_ID") ?? LOCALNET_MARKET.askId,
     },
     explorerTxBase,
     explorerObjectBase,

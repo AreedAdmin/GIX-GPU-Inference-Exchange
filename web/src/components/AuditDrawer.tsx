@@ -63,11 +63,11 @@ export function AuditDrawer() {
           {/* what this proves */}
           <p className="mb-4 text-[11px] leading-relaxed text-muted">
             The F7 audit re-derives <span className="text-secondary">paid-for-what-was-run</span>{" "}
-            from chain + Walrus alone — anyone can run it with no GIX infra. It fetches the
-            input/output blobs from the public Walrus aggregator, recomputes{" "}
-            <span className="num">sha2_256</span> in your browser, and matches them against the
-            on-chain hashes, plus the attestation signature and registered{" "}
-            <span className="num">model_hash</span>.
+            from chain + Walrus alone — anyone can run it with no GIX infra. It reads the input
+            from the chain (inline in the tx) or the public Walrus aggregator and downloads the
+            output blob from Walrus, recomputes <span className="num">sha2_256</span> in your
+            browser, and matches them against the on-chain hashes, plus the attestation
+            signature and registered <span className="num">model_hash</span>.
           </p>
 
           {status === "running" && !audit && (
@@ -240,6 +240,17 @@ function ProofLine({ label, value, color }: { label: string; value: string; colo
 
 function BlobLink({ b }: { b: BlobRef }) {
   const label = b.kind === "input" ? "input blob" : "output blob";
+  // Option 3 inline-input: the input rides on-chain in the tx (no Walrus blob).
+  if (b.onChain) {
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <span className="label-micro shrink-0">{label}</span>
+        <span className="num text-right text-[10.5px] text-secondary">
+          on-chain (inline in tx — no Walrus blob)
+        </span>
+      </div>
+    );
+  }
   if (b.url) {
     return (
       <div className="flex items-center justify-between gap-3">
