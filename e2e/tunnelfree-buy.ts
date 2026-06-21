@@ -20,16 +20,16 @@ import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 // ---- known ids (deployment.testnet.json) -----------------------------------
-const PKG = "0x640eded31a80d1d46bca856ff54aafa111d57c6b438e223712985e2a3d1eca18";
-const CFG = "0x6ff5c8d13745f2342b44d02b419d7873ea50968d245e4d72771d6ba91fd79f4e";
-const MARKET = "0xf0d9989ec9f2479c5f2bf1bc09fb4fdfff920f8dfb9b4a55d1999c4aa1d53fe3";
-const ASK = "0xc57866869b52c333adaa931f530f434b568e556f341e279489de30d71a9eaa49";
+const PKG = "0xa7063d55fcc9b4e9887ffcff9776f344751c72e63b5dea252d60c029b8f9cdaf";
+const CFG = "0x31722451954376a1a63271d08c55f26c815fbae97e9e205e2afa00a59be2811c";
+const MARKET = "0x64bfe7a666f07ba330ddcef0a6a07950d2571933c262dca0db2ee185205bddc8";
+const ASK = "0xa1f088044366b2a73af0e2e55405691958ebe27a74316825abd441eec3b2123b";
 const M = `${PKG}::markets::M_GB10_QWEN35B`;
 const Q = `${PKG}::mock_usdc::MOCK_USDC`;
 const CLOCK = "0x6";
 const CONSUMER = "0xb8e7af9d7be92710d38b1f867c6bc99db9171e47d7bc1afef87ba8a4350ee4e7";
 
-const PROMPT = "What is the capital of France? Answer in one short sentence.";
+const PROMPT = "Explain in detail how a transformer neural network works, including self-attention, positional encoding, and training.";
 const QTY_SCU = 1;
 
 function loadConsumerKeypair(): Ed25519Keypair {
