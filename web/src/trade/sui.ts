@@ -44,6 +44,7 @@ import type {
   OrderResult,
   RunArgs,
 } from "./types";
+import type { JobState } from "../data/types";
 
 type SuiClientT = import("@mysten/sui/jsonRpc").SuiJsonRpcClient;
 type TransactionT = import("@mysten/sui/transactions").Transaction;
@@ -329,6 +330,38 @@ export class SuiOrderClient implements OrderClient {
     });
   }
 
+  /** Cheap read of just the Job's lifecycle `state` (+ the `slashed` flag and whether an
+   *  output blob has been published) for the post-buy poller. Reads the same shared Job
+   *  object as `readJobFields` but only decodes the lifecycle-relevant scalars, so the
+   *  store can advance the My-Jobs row without pulling the full inline-input bytes each tick.
+   *  Maps the on-chain `state: u8` to a UI `JobState` via {@link mapJobStateU8}. Returns
+   *  null when the object isn't readable yet (degrades to "keep polling"). */
+  async getJobState(jobId: string): Promise<JobLifecycle | null> {
+    await this.ensureClient();
+    try {
+      const obj = await this.client.getObject({
+        id: jobId,
+        options: { showContent: true },
+      });
+      const content = (obj as { data?: { content?: unknown } }).data?.content as
+        | { dataType?: string; fields?: Record<string, unknown> }
+        | undefined;
+      if (!content || content.dataType !== "moveObject" || !content.fields) return null;
+      const f = content.fields;
+      const stateU8 = Number(f["state"] ?? -1);
+      const slashed = f["slashed"] === true || f["slashed"] === "true";
+      return {
+        stateU8,
+        state: mapJobStateU8(stateU8, slashed),
+        slashed,
+        hasOutputBlob: decodeMoveBlobId(f["output_blob_id"]) != null,
+      };
+    } catch (e) {
+      console.warn("[gix] could not read Job state", e);
+      return null;
+    }
+  }
+
   /** Read the inline input + output-blob/hash commitments off the shared Job object.
    *  Returns undefined fields when the object/field isn't readable (degrades to fallback). */
   async readJobFields(jobId: string): Promise<JobFields | null> {
@@ -438,6 +471,64 @@ export class SuiOrderClient implements OrderClient {
     return null;
   }
 }
+
+// --- Job lifecycle (poll) ---------------------------------------------------
+
+/** The lifecycle scalars the post-buy poller reads each tick off the shared Job object. */
+export interface JobLifecycle {
+  /** Raw on-chain `state: u8` (job.move STATE_*: 3=Dispatched … 9=Expired). */
+  stateU8: number;
+  /** The mapped UI lifecycle state. */
+  state: JobState;
+  /** The on-chain `slashed` flag (Move has no distinct Slashed u8 — it rides Refunded). */
+  slashed: boolean;
+  /** Whether the completion blob has been published (output_blob_id != 0). */
+  hasOutputBlob: boolean;
+}
+
+// On-chain Job.state u8 values (contracts/sources/job.move § "Lifecycle states").
+const STATE_DISPATCHED = 3;
+const STATE_EXECUTING = 4;
+const STATE_ATTESTED = 5;
+const STATE_VERIFIED = 6;
+const STATE_SETTLED = 7;
+const STATE_REFUNDED = 8;
+const STATE_EXPIRED = 9;
+
+/** Map an on-chain `Job.state: u8` (+ the `slashed` flag) to the UI `JobState`. The Move
+ *  module has no separate Slashed state — a faulted job lands in Refunded with `slashed=true`,
+ *  so we surface "Slashed" when the flag is set. Anything unrecognized falls back to
+ *  Dispatched (the freshly-created state) so the row never shows a blank lifecycle. */
+export function mapJobStateU8(stateU8: number, slashed = false): JobState {
+  switch (stateU8) {
+    case STATE_DISPATCHED:
+      return "Dispatched";
+    case STATE_EXECUTING:
+      return "Executing";
+    case STATE_ATTESTED:
+      return "Attested";
+    case STATE_VERIFIED:
+      return "Verified";
+    case STATE_SETTLED:
+      return "Settled";
+    case STATE_REFUNDED:
+      return slashed ? "Slashed" : "Refunded";
+    case STATE_EXPIRED:
+      return "Expired";
+    default:
+      return "Dispatched";
+  }
+}
+
+/** Terminal UI states the poller stops on. (Verified is NOT terminal on-chain — settlement
+ *  still follows — but the result is already fetchable there, so the store triggers the
+ *  auto-fetch on Verified while continuing to poll until a true terminal state.) */
+export const TERMINAL_JOB_STATES: ReadonlySet<JobState> = new Set<JobState>([
+  "Settled",
+  "Refunded",
+  "Slashed",
+  "Expired",
+]);
 
 // --- Job-object field decoding ---------------------------------------------
 

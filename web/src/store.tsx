@@ -25,7 +25,12 @@ import type {
   Trade,
 } from "./data/types";
 import { MockOrderClient } from "./trade/mock";
-import { SuiOrderClient, type JobFields } from "./trade/sui";
+import {
+  SuiOrderClient,
+  TERMINAL_JOB_STATES,
+  type JobFields,
+  type JobLifecycle,
+} from "./trade/sui";
 import { orderClientKind, loadChainConfig, explorerTxUrl } from "./trade/config";
 import type { JobResult } from "./trade/result";
 import { sha2_256Hex as sha2_256HexBrowser } from "./trade/result";
@@ -40,6 +45,12 @@ function makeOrderClient(source: MarketDataSource): OrderClient {
 
 const MAX_TRADES = 60;
 const MAX_JOBS = 80;
+
+// ── real-chain job poll cadence (no WS feed on chain) ────────────────────────
+/** How often the post-buy poller reads the Job object's on-chain `state`. */
+const JOB_POLL_INTERVAL_MS = 3_000;
+/** Hard stop for the poller — the GB10 demo settles in ~10-15s, so ~4 min is generous. */
+const JOB_POLL_TIMEOUT_MS = 4 * 60_000;
 
 export interface OpenOrder {
   id: string;
@@ -232,6 +243,16 @@ export function GixProvider({ children }: { children: ReactNode }) {
   // per-job on-chain Job fields (inline input + I/O hash/blob commitments), read once at
   // result-fetch time and reused by the F7 audit so the input check uses real chain bytes.
   const jobFieldsRef = useRef<Record<string, JobFields>>({});
+
+  // Active real-chain job pollers, keyed by jobId. Each entry is an interval handle started
+  // after a real-chain run/buyAndRun; cleared on terminal state, timeout, or unmount.
+  const jobPollersRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  // Forward refs so the poller (started inside submitOrder) can trigger the result fetch +
+  // viewer open, which are declared further down. Filled in an effect below.
+  const fetchResultRef = useRef<((jobId: string) => Promise<void>) | null>(null);
+  const openResultRef = useRef<((jobId: string) => void) | null>(null);
+  // submitOrder is declared before pollJobOnChain, so it reaches the poller via this ref.
+  const pollJobOnChainRef = useRef<((jobId: string) => void) | null>(null);
 
   // F7 in-browser audit state
   const [audits, setAudits] = useState<Record<string, AuditResult>>({});
@@ -521,6 +542,9 @@ export function GixProvider({ children }: { children: ReactNode }) {
               };
               return [row, ...prev].slice(0, MAX_JOBS);
             });
+            // The live chain has no WS lifecycle feed, so poll the Job object on-chain to
+            // advance Dispatched→…→Settled and auto-fetch + render the result on settle.
+            pollJobOnChainRef.current?.(res.jobId);
           }
         }
         await refreshBalances();
@@ -534,6 +558,120 @@ export function GixProvider({ children }: { children: ReactNode }) {
     setOpenOrders((prev) =>
       prev.map((o) => (o.id === id ? { ...o, status: "canceled" } : o)),
     );
+  }, []);
+
+  // ── real-chain job poller ────────────────────────────────────────────────────
+  // On the live chain there is NO WS lifecycle feed (the mock's onJobs is gated off when
+  // live — see the job-lifecycle effect). So after a run/buyAndRun creates a Job we poll the
+  // shared Job object's on-chain `state` every JOB_POLL_INTERVAL_MS until it reaches a
+  // terminal state (or the timeout). Each tick maps state u8 → JobState and advances the
+  // matching JobRow + OpenOrder; once the result is fetchable (Verified/Settled) it auto-
+  // fetches the output and surfaces the ResultViewer so the answer renders without a click.
+  const pollJobOnChain = useCallback((jobId: string) => {
+    const client = orderClientRef.current;
+    // Gate strictly to the real-chain client — mock jobs are driven by the onJobs feed.
+    if (!(client instanceof SuiOrderClient)) return;
+    // Don't double-poll a job already being watched (e.g. a quick re-submit of the same id).
+    if (jobPollersRef.current[jobId]) return;
+
+    const startedAt = Date.now();
+    // Whether we've already kicked the auto result fetch (only do it once, on first ready).
+    let resultTriggered = false;
+
+    const stop = () => {
+      const handle = jobPollersRef.current[jobId];
+      if (handle) {
+        clearInterval(handle);
+        delete jobPollersRef.current[jobId];
+      }
+    };
+
+    const applyLifecycle = (life: JobLifecycle) => {
+      const { state } = life;
+      const now = Date.now();
+
+      // Advance the My-Jobs row to the live on-chain state.
+      setJobs((prev) => {
+        const idx = prev.findIndex((j) => j.jobId === jobId);
+        if (idx < 0) return prev;
+        if (prev[idx].state === state) return prev; // no change → no re-render churn
+        const next = prev.slice();
+        next[idx] = { ...next[idx], state, updatedTs: now };
+        return next;
+      });
+
+      // Reconcile the open order: past Dispatched the fill is real → mark filled/100%.
+      setOpenOrders((prev) =>
+        prev.map((o) =>
+          o.id === jobId && o.status === "open"
+            ? { ...o, status: "filled", filledScu: o.sizeScu }
+            : o,
+        ),
+      );
+
+      // Mirror a terminal outcome onto the originating activity row (the live path has no
+      // onJobs feed to do this), matching the mock feed's behavior.
+      if (TERMINAL_JOB_STATES.has(state)) {
+        setActivity((prev) => {
+          const i = prev.findIndex((e) => e.jobId === jobId && e.kind !== "settle");
+          if (i < 0) return prev;
+          const updated = prev.slice();
+          updated[i] = {
+            ...updated[i],
+            status: state === "Slashed" ? "failed" : "settled",
+            ts: now,
+          };
+          return updated;
+        });
+      }
+
+      // Auto-fetch + surface the result the moment it's available. On a VALID verdict the
+      // chain jumps Executing→Verified→Settled (job.move record_attestation), so Verified/
+      // Settled mean the output + on-chain output_hash are recorded — trigger once and open
+      // the viewer so the answer renders without a manual "view" click. A bare `Attested`
+      // only happens for a FAILING verdict (→ refund/slash) and carries no usable result, so
+      // it's deliberately excluded. Slashed/Refunded/Expired likewise carry no result.
+      const resultReady = state === "Verified" || state === "Settled";
+      if (resultReady && !resultTriggered) {
+        resultTriggered = true;
+        const open = openResultRef.current;
+        const fetch = fetchResultRef.current;
+        // openResult both fetches (if not cached) AND opens the ResultViewer.
+        if (open) open(jobId);
+        else if (fetch) void fetch(jobId);
+      }
+
+      // Stop on any terminal state — settlement is done, nothing more to poll.
+      if (TERMINAL_JOB_STATES.has(state)) stop();
+    };
+
+    const tick = async () => {
+      if (Date.now() - startedAt > JOB_POLL_TIMEOUT_MS) {
+        stop();
+        return;
+      }
+      try {
+        const life = await client.getJobState(jobId);
+        if (life) applyLifecycle(life);
+      } catch (e) {
+        // Transient RPC error — keep polling; the timeout bounds the retries.
+        console.warn("[gix] job poll tick failed", e);
+      }
+    };
+
+    // Kick an immediate read (the GB10 can settle before the first interval fires), then poll.
+    void tick();
+    jobPollersRef.current[jobId] = setInterval(() => void tick(), JOB_POLL_INTERVAL_MS);
+  }, []);
+  pollJobOnChainRef.current = pollJobOnChain;
+
+  // Stop every active poller on unmount (or when the order client changes).
+  useEffect(() => {
+    const pollers = jobPollersRef.current;
+    return () => {
+      for (const id of Object.keys(pollers)) clearInterval(pollers[id]);
+      jobPollersRef.current = {};
+    };
   }, []);
 
   // ── verifiable result actions (demo-contract §3.1) ──────────────────────────
@@ -607,6 +745,11 @@ export function GixProvider({ children }: { children: ReactNode }) {
     [results, fetchResult],
   );
   const closeResult = useCallback(() => setViewingJobId(null), []);
+
+  // Keep the forward refs the poller uses in sync (it's created before these callbacks).
+  fetchResultRef.current = fetchResult;
+  openResultRef.current = openResult;
+
   const explorerUrl = useCallback(
     (digest?: string) => explorerTxUrl(chainCfgRef.current, digest),
     [],
