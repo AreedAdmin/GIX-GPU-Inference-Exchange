@@ -66,25 +66,26 @@
   ul.list li::before{content:"";position:absolute;left:2px;top:8px;width:8px;height:8px;border-radius:2px;background:var(--accent)}
   ul.list li b{font-weight:700}
   ul.list li .x{color:var(--mute);font-size:13.5px}
+  .lane-h{font-family:var(--mono);font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent);font-weight:700;padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid var(--line2)}
 
   /* layered architecture */
-  .layers{display:flex;flex-direction:column;gap:8px;margin-top:6px}
-  .layer{display:grid;grid-template-columns:188px 1fr;align-items:center;gap:14px;border:1px solid var(--line2);border-radius:11px;
-    background:linear-gradient(90deg,var(--panel) 0%,#fff 40%);padding:11px 14px}
+  .layers{display:flex;flex-direction:column;gap:11px;margin-top:8px}
+  .layer{display:grid;grid-template-columns:210px 1fr;align-items:center;gap:18px;border:1px solid var(--line2);border-radius:12px;
+    background:linear-gradient(90deg,var(--panel) 0%,#fff 40%);padding:15px 18px}
   .layer .ll{display:flex;flex-direction:column}
-  .layer .ll .k{font-family:var(--mono);font-size:10.5px;letter-spacing:1.5px;color:var(--accent);text-transform:uppercase}
-  .layer .ll .name{font-weight:700;font-size:14.5px}
-  .layer .mods{display:flex;flex-wrap:wrap;gap:6px}
-  .mod{font-family:var(--mono);font-size:11.5px;border:1px solid var(--line2);background:#fff;border-radius:6px;padding:4px 9px;color:var(--ink2)}
+  .layer .ll .k{font-family:var(--mono);font-size:11.5px;letter-spacing:1.5px;color:var(--accent);text-transform:uppercase}
+  .layer .ll .name{font-weight:700;font-size:16.5px}
+  .layer .mods{display:flex;flex-wrap:wrap;gap:8px}
+  .mod{font-family:var(--mono);font-size:13px;border:1px solid var(--line2);background:#fff;border-radius:7px;padding:6px 11px;color:var(--ink2)}
   .layer.hot{border-color:var(--accent);background:linear-gradient(90deg,var(--accent-soft) 0%,#fff 45%)}
   .layer.hot .mod{border-color:#c9d6f7}
 
   /* pipeline */
-  .pipe{display:flex;align-items:stretch;gap:0;margin-top:10px;flex-wrap:wrap}
-  .step{flex:1;min-width:108px;border:1px solid var(--line2);border-radius:10px;background:var(--panel);padding:12px 10px;text-align:center;position:relative}
+  .pipe{display:flex;align-items:stretch;gap:0;margin-top:14px;flex-wrap:wrap}
+  .step{flex:1;min-width:130px;border:1px solid var(--line2);border-radius:12px;background:var(--panel);padding:18px 14px;text-align:center;position:relative}
   .step.tee{background:var(--accent-soft);border-color:var(--accent)}
-  .step .st{font-weight:700;font-size:13.5px} .step .ss{font-family:var(--mono);font-size:10.5px;color:var(--mute);margin-top:3px}
-  .arrow{display:flex;align-items:center;color:var(--faint);font-size:18px;padding:0 6px}
+  .step .st{font-weight:700;font-size:16px} .step .ss{font-family:var(--mono);font-size:12px;color:var(--mute);margin-top:4px}
+  .arrow{display:flex;align-items:center;color:var(--faint);font-size:22px;padding:0 8px}
   .branch{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
   .out{border-radius:10px;padding:12px 14px;border:1px solid}
   .out.ok{background:var(--green-soft);border-color:var(--green)} .out.bad{background:var(--red-soft);border-color:var(--red)}
@@ -154,16 +155,21 @@
       <h2>Compute is priced like real&nbsp;estate — illiquid, opaque, and unverifiable.</h2>
       <div class="rule"></div>
       <div class="cols c2" style="margin-top:10px">
-        <ul class="list">
-          <li><b>Locked capacity.</b> <span class="x">You rent a whole GPU by the hour and pay for idle time; bursty AI workloads waste it.</span></li>
-          <li><b>Opaque pricing.</b> <span class="x">List prices, not a real market — no continuous, neutral spot price for compute.</span></li>
-          <li><b>Black-box trust.</b> <span class="x">An API can silently swap models, quantize, or truncate. You can't prove what ran on your input.</span></li>
-        </ul>
-        <ul class="list">
-          <li><b>Single-provider risk.</b> <span class="x">Settlement, refunds, and SLAs depend on trusting one company.</span></li>
-          <li><b>Stranded supply.</b> <span class="x">Idle/ spare GPU capacity has no neutral, permissionless venue to be sold per-job.</span></li>
-          <li><b>No audit trail.</b> <span class="x">No tamper-evident record binding model · input · output for a given job.</span></li>
-        </ul>
+        <div>
+          <div class="lane-h">GPU Providers</div>
+          <ul class="list">
+            <li><b>Idle / spare capacity.</b> <span class="x">Stranded GPU hours have no neutral, permissionless venue to be sold per-job.</span></li>
+            <li><b>Opaque pricing.</b> <span class="x">List prices, not a real market — no continuous, neutral spot price for compute.</span></li>
+          </ul>
+        </div>
+        <div>
+          <div class="lane-h">GPU Users</div>
+          <ul class="list">
+            <li><b>Locked capacity.</b> <span class="x">You rent a whole GPU by the hour and pay for idle time; bursty AI workloads waste it.</span></li>
+            <li><b>Black-box trust &amp; no audit trail.</b> <span class="x">An API can silently swap models, quantize, or truncate — with no tamper-evident record binding model · input · output.</span></li>
+            <li><b>Expensive API costs.</b> <span class="x">You overpay for committed capacity and premium per-token pricing.</span></li>
+          </ul>
+        </div>
       </div>
       <p class="lead" style="margin-top:18px">The result: AI builders overpay for committed capacity and still can't <i>prove</i> they got what they paid for.</p>
       <div class="foot"><span>THE GAP</span><span>ILLIQUID · OPAQUE · UNVERIFIABLE</span></div>
